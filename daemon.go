@@ -90,6 +90,7 @@ func Start() {
 		var caught kkpanic.Caught
 		kkpanic.Try(func() {
 			service.Start()
+			kklogger.InfoJ("daemon.Start", fmt.Sprintf("service %s started", service.Name()))
 		}).CatchAll(func(caught kkpanic.Caught) {
 			kklogger.ErrorJ("daemon.Start", fmt.Sprintf("Service %s fail, message: %s", service.Name(), caught.String()))
 		})
@@ -118,6 +119,7 @@ func Stop() {
 		var caught kkpanic.Caught
 		kkpanic.Try(func() {
 			service.Stop()
+			kklogger.InfoJ("daemon.Stop", fmt.Sprintf("service %s stopped", service.Name()))
 		}).CatchAll(func(caught kkpanic.Caught) {
 			kklogger.ErrorJ("daemon.Stop", fmt.Sprintf("Service %s fail, message: %s", service.Name(), caught.String()))
 		})
