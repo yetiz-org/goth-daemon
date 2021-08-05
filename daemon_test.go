@@ -1,6 +1,7 @@
 package kkdaemon
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,8 +29,14 @@ func TestService(t *testing.T) {
 		order: 2,
 	}})
 
+	RegisterServiceInline("P3", 3, func() {
+		println("start p3")
+	}, func(sig os.Signal) {
+		println("stop p3")
+	})
+
 	Start()
-	Stop()
+	Stop(nil)
 }
 
 type P1 struct {
@@ -40,7 +47,7 @@ func (p *P1) Start() {
 	println("start p1")
 }
 
-func (p *P1) Stop() {
+func (p *P1) Stop(sig os.Signal) {
 	println("stop p1")
 }
 
@@ -52,6 +59,6 @@ func (p *P2) Start() {
 	println("start p2")
 }
 
-func (p *P2) Stop() {
+func (p *P2) Stop(sig os.Signal) {
 	println("stop p2")
 }

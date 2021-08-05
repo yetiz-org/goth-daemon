@@ -19,7 +19,7 @@ var sig = make(chan os.Signal, 1)
 
 type Service interface {
 	Start()
-	Stop()
+	Stop(sig os.Signal)
 	Restart()
 	Info() string
 	Name() string
@@ -35,7 +35,7 @@ func (s *DefaultService) Start() {
 
 }
 
-func (s *DefaultService) Stop() {
+func (s *DefaultService) Stop(sig os.Signal) {
 
 }
 
@@ -70,6 +70,35 @@ func RegisterService(service Service) error {
 	}
 
 	return nil
+}
+
+type _InlineService struct {
+	DefaultService
+	StartFunc func()
+	StopFunc  func(sig os.Signal)
+}
+
+func (s *_InlineService) Start() {
+	if s.StartFunc != nil {
+		s.StartFunc()
+	}
+}
+
+func (s *_InlineService) Stop(sig os.Signal) {
+	if s.StopFunc != nil {
+		s.StopFunc(sig)
+	}
+}
+
+func RegisterServiceInline(name string, order int, startFunc func(), stopFunc func(sig os.Signal)) error {
+	return RegisterService(&_InlineService{
+		DefaultService: DefaultService{
+			name:  name,
+			order: order,
+		},
+		StartFunc: startFunc,
+		StopFunc:  stopFunc,
+	})
 }
 
 func GetService(name string) Service {
@@ -109,7 +138,7 @@ func Start() {
 	}
 }
 
-func Stop() {
+func Stop(sig os.Signal) {
 	var sl []Service
 	ServiceMap.Range(func(key, value interface{}) bool {
 		sl = append(sl, value.(Service))
@@ -123,7 +152,7 @@ func Stop() {
 	for _, service := range sl {
 		var caught kkpanic.Caught
 		kkpanic.Try(func() {
-			service.Stop()
+			service.Stop(sig)
 			kklogger.InfoJ("daemon.Stop", fmt.Sprintf("service %s stopped", service.Name()))
 		}).CatchAll(func(caught kkpanic.Caught) {
 			kklogger.ErrorJ("daemon.Stop", fmt.Sprintf("Service %s fail, message: %s", service.Name(), caught.String()))
@@ -150,10 +179,10 @@ func init() {
 		if !StopWhenKill {
 			return
 		}
-		
+
 		msg := fmt.Sprintf("SIGNAL: %s, SHUTDOWN CATCH", s.String())
 		kklogger.InfoJ("kkdaemon:init._StopWhenKillOnce", msg)
-		Stop()
+		Stop(s)
 		kklogger.InfoJ("kkdaemon:init._StopWhenKillOnce", "Done")
 	}()
 }
