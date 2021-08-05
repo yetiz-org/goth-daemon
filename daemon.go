@@ -1,16 +1,21 @@
-package daemon
+package kkdaemon
 
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/signal"
 	"sort"
 	"sync"
+	"syscall"
 
 	kklogger "github.com/kklab-com/goth-kklogger"
 	kkpanic "github.com/kklab-com/goth-panic"
 )
 
 var ServiceMap = sync.Map{}
+var StopWhenKill = true
+var sig = make(chan os.Signal, 1)
 
 type Service interface {
 	Start()
@@ -136,4 +141,19 @@ func Stop() {
 type PanicResult struct {
 	Service Service
 	Caught  kkpanic.Caught
+}
+
+func init() {
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		s := <-sig
+		if !StopWhenKill {
+			return
+		}
+		
+		msg := fmt.Sprintf("SIGNAL: %s, SHUTDOWN CATCH", s.String())
+		kklogger.InfoJ("kkdaemon:init._StopWhenKillOnce", msg)
+		Stop()
+		kklogger.InfoJ("kkdaemon:init._StopWhenKillOnce", "Done")
+	}()
 }
