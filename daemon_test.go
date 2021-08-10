@@ -9,24 +9,24 @@ import (
 
 func TestService(t *testing.T) {
 	assert.EqualValues(t, nil, RegisterService(&DefaultService{
-		name:  "SS",
-		order: 1,
+		ServiceName:  "SS",
+		ServiceOrder: 1,
 	}))
 
 	assert.EqualValues(t, 1, GetService("SS").Order())
 	assert.NotNil(t, RegisterService(&DefaultService{
-		name:  "SS",
-		order: 2,
+		ServiceName:  "SS",
+		ServiceOrder: 2,
 	}))
 
 	RegisterService(&P1{Service: &DefaultService{
-		name:  "P1",
-		order: 1,
+		ServiceName:  "P1",
+		ServiceOrder: 1,
 	}})
 
 	RegisterService(&P2{Service: &DefaultService{
-		name:  "P2",
-		order: 2,
+		ServiceName:  "P2",
+		ServiceOrder: 2,
 	}})
 
 	RegisterServiceInline("P3", 3, func() {

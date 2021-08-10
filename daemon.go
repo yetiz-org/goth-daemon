@@ -27,8 +27,8 @@ type Service interface {
 }
 
 type DefaultService struct {
-	name  string
-	order int
+	ServiceName  string
+	ServiceOrder int
 }
 
 func (s *DefaultService) Start() {
@@ -44,11 +44,11 @@ func (s *DefaultService) Restart() {
 }
 
 func (s *DefaultService) Name() string {
-	return s.name
+	return s.ServiceName
 }
 
 func (s *DefaultService) Order() int {
-	return s.order
+	return s.ServiceOrder
 }
 
 func (s *DefaultService) Info() string {
@@ -93,8 +93,8 @@ func (s *_InlineService) Stop(sig os.Signal) {
 func RegisterServiceInline(name string, order int, startFunc func(), stopFunc func(sig os.Signal)) error {
 	return RegisterService(&_InlineService{
 		DefaultService: DefaultService{
-			name:  name,
-			order: order,
+			ServiceName:  name,
+			ServiceOrder: order,
 		},
 		StartFunc: startFunc,
 		StopFunc:  stopFunc,
