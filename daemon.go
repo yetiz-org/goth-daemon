@@ -13,67 +13,61 @@ import (
 	kkpanic "github.com/kklab-com/goth-panic"
 )
 
-var ServiceMap = sync.Map{}
+var DaemonMap = sync.Map{}
 var StopWhenKill = true
 var sig = make(chan os.Signal, 1)
 
-type Service interface {
+type DaemonEntity struct {
+	Daemon Daemon
+	Name   string
+	Order  int
+}
+
+type Daemon interface {
 	Start()
 	Stop(sig os.Signal)
 	Restart()
 	Info() string
-	Name() string
-	Order() int
 }
 
-type DefaultService struct {
-	ServiceName  string
-	ServiceOrder int
+type DefaultDaemon struct {
 }
 
-func (s *DefaultService) Start() {
+func (s *DefaultDaemon) Start() {
 
 }
 
-func (s *DefaultService) Stop(sig os.Signal) {
+func (s *DefaultDaemon) Stop(sig os.Signal) {
 
 }
 
-func (s *DefaultService) Restart() {
+func (s *DefaultDaemon) Restart() {
 
 }
 
-func (s *DefaultService) Name() string {
-	return s.ServiceName
-}
-
-func (s *DefaultService) Order() int {
-	return s.ServiceOrder
-}
-
-func (s *DefaultService) Info() string {
+func (s *DefaultDaemon) Info() string {
 	bs, _ := json.Marshal(s)
 	return string(bs)
 }
 
-func RegisterService(service Service) error {
-	if service == nil {
-		return fmt.Errorf("nil Service")
+func RegisterDaemon(name string, order int, daemon Daemon) error {
+	if daemon == nil {
+		return fmt.Errorf("nil daemon")
 	}
 
-	if service.Name() == "" {
-		return fmt.Errorf("service.Name is empty")
+	if name == "" {
+		return fmt.Errorf("name is empty")
 	}
 
-	if _, loaded := ServiceMap.LoadOrStore(service.Name(), service); loaded {
-		return fmt.Errorf("service name is exist")
+	if _, loaded := DaemonMap.LoadOrStore(name, &DaemonEntity{Name: name, Order: order, Daemon: daemon}); loaded {
+		return fmt.Errorf("name is exist")
 	}
 
 	return nil
 }
 
 type _InlineService struct {
-	DefaultService
+	DefaultDaemon
 	StartFunc func()
 	StopFunc  func(sig os.Signal)
 }
@@ -91,85 +85,82 @@ func (s *_InlineService) Stop(sig os.Signal) {
 }
 
 func RegisterServiceInline(name string, order int, startFunc func(), stopFunc func(sig os.Signal)) error {
-	return RegisterService(&_InlineService{
-		DefaultService: DefaultService{
-			ServiceName:  name,
-			ServiceOrder: order,
-		},
-		StartFunc: startFunc,
-		StopFunc:  stopFunc,
+	return RegisterDaemon(name, order, &_InlineService{
+		DefaultDaemon: DefaultDaemon{},
+		StartFunc:     startFunc,
+		StopFunc:      stopFunc,
 	})
 }
 
-func GetService(name string) Service {
-	if v, f := ServiceMap.Load(name); f {
-		return v.(Service)
+func GetService(name string) *DaemonEntity {
+	if v, f := DaemonMap.Load(name); f {
+		return v.(*DaemonEntity)
 	}
 
 	return nil
 }
 
 func Start() {
-	var sl []Service
-	ServiceMap.Range(func(key, value interface{}) bool {
-		sl = append(sl, value.(Service))
+	var el []*DaemonEntity
+	DaemonMap.Range(func(key, value interface{}) bool {
+		el = append(el, value.(*DaemonEntity))
 		return true
 	})
 
-	sort.Slice(sl, func(i, j int) bool {
-		return sl[i].Order() < sl[j].Order()
+	sort.Slice(el, func(i, j int) bool {
+		return el[i].Order < el[j].Order
 	})
 
-	for _, service := range sl {
+	for _, entity := range el {
 		var caught kkpanic.Caught
 		kkpanic.Try(func() {
-			service.Start()
-			kklogger.InfoJ("daemon.Start", fmt.Sprintf("service %s started", service.Name()))
+			entity.Daemon.Start()
+			kklogger.InfoJ("daemon.Start", fmt.Sprintf("entity %s started", entity.Name))
 		}).CatchAll(func(caught kkpanic.Caught) {
-			kklogger.ErrorJ("daemon.Start", fmt.Sprintf("Service %s fail, message: %s", service.Name(), caught.String()))
+			kklogger.ErrorJ("daemon.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
 		})
 
 		if caught != nil {
 			panic(&PanicResult{
-				Service: service,
-				Caught:  caught,
+				Daemon: entity.Daemon,
+				Caught: caught,
 			})
 		}
 	}
 }
 
 func Stop(sig os.Signal) {
-	var sl []Service
-	ServiceMap.Range(func(key, value interface{}) bool {
-		sl = append(sl, value.(Service))
+	var el []*DaemonEntity
+	DaemonMap.Range(func(key, value interface{}) bool {
+		el = append(el, value.(*DaemonEntity))
 		return true
 	})
 
-	sort.Slice(sl, func(i, j int) bool {
-		return sl[i].Order() > sl[j].Order()
+	sort.Slice(el, func(i, j int) bool {
+		return el[i].Order > el[j].Order
 	})
 
-	for _, service := range sl {
+	for _, entity := range el {
 		var caught kkpanic.Caught
 		kkpanic.Try(func() {
-			service.Stop(sig)
-			kklogger.InfoJ("daemon.Stop", fmt.Sprintf("service %s stopped", service.Name()))
+			entity.Daemon.Stop(sig)
+			kklogger.InfoJ("daemon.Stop", fmt.Sprintf("entity %s stopped", entity.Name))
 		}).CatchAll(func(caught kkpanic.Caught) {
-			kklogger.ErrorJ("daemon.Stop", fmt.Sprintf("Service %s fail, message: %s", service.Name(), caught.String()))
+			kklogger.ErrorJ("daemon.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
 		})
 
 		if caught != nil {
 			panic(&PanicResult{
-				Service: service,
-				Caught:  caught,
+				Daemon: entity.Daemon,
+				Caught: caught,
 			})
 		}
 	}
 }
 
 type PanicResult struct {
-	Service Service
-	Caught  kkpanic.Caught
+	Daemon Daemon
+	Caught kkpanic.Caught
 }
 
 func init() {

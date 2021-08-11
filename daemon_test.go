@@ -8,26 +8,14 @@ import (
 )
 
 func TestService(t *testing.T) {
-	assert.EqualValues(t, nil, RegisterService(&DefaultService{
-		ServiceName:  "SS",
-		ServiceOrder: 1,
-	}))
+	assert.EqualValues(t, nil, RegisterDaemon("SS", 1, &DefaultDaemon{}))
 
-	assert.EqualValues(t, 1, GetService("SS").Order())
-	assert.NotNil(t, RegisterService(&DefaultService{
-		ServiceName:  "SS",
-		ServiceOrder: 2,
-	}))
+	assert.EqualValues(t, 1, GetService("SS").Order)
+	assert.NotNil(t, RegisterDaemon("SS", 2, &DefaultDaemon{}))
 
-	RegisterService(&P1{Service: &DefaultService{
-		ServiceName:  "P1",
-		ServiceOrder: 1,
-	}})
+	RegisterDaemon("P1", 1, &P1{Daemon: &DefaultDaemon{}})
 
-	RegisterService(&P2{Service: &DefaultService{
-		ServiceName:  "P2",
-		ServiceOrder: 2,
-	}})
+	RegisterDaemon("P2", 2, &P2{Daemon: &DefaultDaemon{}})
 
 	RegisterServiceInline("P3", 3, func() {
 		println("start p3")
@@ -40,7 +28,7 @@ func TestService(t *testing.T) {
 }
 
 type P1 struct {
-	Service
+	Daemon
 }
 
 func (p *P1) Start() {
@@ -52,7 +40,7 @@ func (p *P1) Stop(sig os.Signal) {
 }
 
 type P2 struct {
-	Service
+	Daemon
 }
 
 func (p *P2) Start() {
