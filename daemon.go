@@ -165,7 +165,6 @@ func IsShutdown() bool {
 }
 
 func Shutdown(signal os.Signal) {
-	shutdown = true
 	sig <- signal
 }
 
@@ -177,6 +176,7 @@ type PanicResult struct {
 func init() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
+		shutdown = true
 		s := <-sig
 		if !StopWhenKill {
 			close(StopWhenKillDone)
