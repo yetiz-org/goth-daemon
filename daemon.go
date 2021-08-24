@@ -159,6 +159,10 @@ func Stop(sig os.Signal) {
 	}
 }
 
+func Shutdown(signal os.Signal) {
+	sig <- signal
+}
+
 type PanicResult struct {
 	Daemon Daemon
 	Caught kkpanic.Caught
