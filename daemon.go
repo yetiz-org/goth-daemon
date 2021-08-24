@@ -16,6 +16,7 @@ import (
 var DaemonMap = sync.Map{}
 var StopWhenKill = true
 var sig = make(chan os.Signal, 1)
+var StopWhenKillDone = make(chan int)
 
 type DaemonEntity struct {
 	Daemon Daemon
@@ -168,6 +169,7 @@ func init() {
 	go func() {
 		s := <-sig
 		if !StopWhenKill {
+			close(StopWhenKillDone)
 			return
 		}
 
@@ -175,5 +177,6 @@ func init() {
 		kklogger.InfoJ("kkdaemon:init._StopWhenKillOnce", msg)
 		Stop(s)
 		kklogger.InfoJ("kkdaemon:init._StopWhenKillOnce", "Done")
+		close(StopWhenKillDone)
 	}()
 }
