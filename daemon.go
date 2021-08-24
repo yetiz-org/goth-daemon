@@ -17,6 +17,7 @@ var DaemonMap = sync.Map{}
 var StopWhenKill = true
 var sig = make(chan os.Signal, 1)
 var StopWhenKillDone = make(chan int)
+var shutdown = false
 
 type DaemonEntity struct {
 	Daemon Daemon
@@ -159,7 +160,12 @@ func Stop(sig os.Signal) {
 	}
 }
 
+func IsShutdown() bool {
+	return shutdown
+}
+
 func Shutdown(signal os.Signal) {
+	shutdown = true
 	sig <- signal
 }
 
