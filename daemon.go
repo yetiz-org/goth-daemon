@@ -26,6 +26,7 @@ type DaemonEntity struct {
 }
 
 type Daemon interface {
+	Registered()
 	Start()
 	Stop(sig os.Signal)
 	Restart()
@@ -33,6 +34,10 @@ type Daemon interface {
 }
 
 type DefaultDaemon struct {
+}
+
+func (s *DefaultDaemon) Registered() {
+
 }
 
 func (s *DefaultDaemon) Start() {
@@ -65,6 +70,7 @@ func RegisterDaemon(name string, order int, daemon Daemon) error {
 		return fmt.Errorf("name is exist")
 	}
 
+	daemon.Registered()
 	return nil
 }
 
