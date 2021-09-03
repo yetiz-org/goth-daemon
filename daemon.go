@@ -15,9 +15,9 @@ import (
 )
 
 var DaemonMap = sync.Map{}
-var StopWhenKill = true
-var sig = make(chan os.Signal, 1)
-var StopWhenKillDone = make(chan int)
+var AutoStopWhenKill = true
+var sig = make(chan os.Signal)
+var stopWhenKillDone = make(chan int)
 var shutdown = false
 
 type DaemonEntity struct {
@@ -188,8 +188,12 @@ func IsShutdown() bool {
 	return shutdown
 }
 
-func Shutdown(signal os.Signal) {
+func ShutdownGracefully(signal os.Signal) {
 	sig <- signal
+}
+
+func WaitShutdown() {
+	<-stopWhenKillDone
 }
 
 type PanicResult struct {
@@ -200,17 +204,17 @@ type PanicResult struct {
 func init() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
-		shutdown = true
 		s := <-sig
-		if !StopWhenKill {
-			close(StopWhenKillDone)
+		shutdown = true
+		if !AutoStopWhenKill {
+			close(stopWhenKillDone)
 			return
 		}
 
 		msg := fmt.Sprintf("SIGNAL: %s, SHUTDOWN CATCH", s.String())
-		kklogger.InfoJ("kkdaemon:init._StopWhenKillOnce", msg)
+		kklogger.InfoJ("kkdaemon:AutoStopWhenKill", msg)
 		Stop(s)
-		kklogger.InfoJ("kkdaemon:init._StopWhenKillOnce", "Done")
-		close(StopWhenKillDone)
+		kklogger.InfoJ("kkdaemon:AutoStopWhenKill", "Done")
+		close(stopWhenKillDone)
 	}()
 }
