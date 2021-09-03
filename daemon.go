@@ -137,18 +137,19 @@ func Start() {
 	})
 
 	for _, entity := range el {
-		var caught kkpanic.Caught
+		var c kkpanic.Caught
 		kkpanic.Try(func() {
 			entity.Daemon.Start()
 			kklogger.InfoJ("daemon.Start", fmt.Sprintf("entity %s started", entity.Daemon.Name()))
 		}).CatchAll(func(caught kkpanic.Caught) {
+			c = caught
 			kklogger.ErrorJ("daemon.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Daemon.Name(), caught.String()))
 		})
 
-		if caught != nil {
+		if c != nil {
 			panic(&PanicResult{
 				Daemon: entity.Daemon,
-				Caught: caught,
+				Caught: c,
 			})
 		}
 	}
