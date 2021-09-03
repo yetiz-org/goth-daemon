@@ -29,7 +29,7 @@ type DaemonEntity struct {
 }
 
 type Daemon interface {
-	Registered()
+	Registered() error
 	Start()
 	Stop(sig os.Signal)
 	Restart()
@@ -42,8 +42,8 @@ type DefaultDaemon struct {
 	Params map[string]interface{}
 }
 
-func (d *DefaultDaemon) Registered() {
-
+func (d *DefaultDaemon) Registered() error {
+	return nil
 }
 
 func (d *DefaultDaemon) Start() {
@@ -85,8 +85,7 @@ func RegisterDaemon(order int, daemon Daemon) error {
 		return fmt.Errorf("name is exist")
 	}
 
-	daemon.Registered()
-	return nil
+	return daemon.Registered()
 }
 
 type _InlineService struct {
