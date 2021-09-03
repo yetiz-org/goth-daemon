@@ -21,8 +21,9 @@ var stopWhenKillDone = make(chan int)
 var shutdown = false
 
 type DaemonEntity struct {
-	Daemon Daemon
-	Order  int
+	Daemon  Daemon
+	Order   int
+	started bool
 }
 
 type Daemon interface {
@@ -140,6 +141,7 @@ func Start() {
 		var c kkpanic.Caught
 		kkpanic.Try(func() {
 			entity.Daemon.Start()
+			entity.started = true
 			kklogger.InfoJ("daemon.Start", fmt.Sprintf("entity %s started", entity.Daemon.Name()))
 		}).CatchAll(func(caught kkpanic.Caught) {
 			c = caught
@@ -167,6 +169,10 @@ func Stop(sig os.Signal) {
 	})
 
 	for _, entity := range el {
+		if !entity.started {
+			continue
+		}
+
 		var caught kkpanic.Caught
 		kkpanic.Try(func() {
 			entity.Daemon.Stop(sig)
