@@ -13,9 +13,8 @@ func TestService(t *testing.T) {
 	assert.EqualValues(t, 1, GetService("SS").Order)
 	assert.NotNil(t, RegisterDaemon(2, &DefaultDaemon{name: "SS"}))
 
-	RegisterDaemon(1, &P1{Daemon: &DefaultDaemon{name: "P1"}})
-
-	RegisterDaemon(2, &P2{Daemon: &DefaultDaemon{name: "P2"}})
+	assert.Nil(t, RegisterDaemon(1, &P1{Daemon: &DefaultDaemon{}}))
+	assert.Nil(t, RegisterDaemon(2, &P2{Daemon: &DefaultDaemon{}}))
 
 	RegisterServiceInline("P3", 3, func() {
 		println("start p3")

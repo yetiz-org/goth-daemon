@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"reflect"
 	"sort"
 	"sync"
 	"syscall"
@@ -67,11 +68,16 @@ func RegisterDaemon(order int, daemon Daemon) error {
 		return fmt.Errorf("nil daemon")
 	}
 
-	if daemon.Name() == "" {
+	name := daemon.Name()
+	if name == "" {
+		name = reflect.TypeOf(daemon).Elem().Name()
+	}
+
+	if name == "" {
 		return fmt.Errorf("name is empty")
 	}
 
-	if _, loaded := DaemonMap.LoadOrStore(daemon.Name(), &DaemonEntity{Order: order, Daemon: daemon}); loaded {
+	if _, loaded := DaemonMap.LoadOrStore(name, &DaemonEntity{Order: order, Daemon: daemon}); loaded {
 		return fmt.Errorf("name is exist")
 	}
 
