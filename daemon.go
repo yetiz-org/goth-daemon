@@ -47,7 +47,8 @@ type TimerDaemon interface {
 }
 
 type DefaultDaemon struct {
-	name string
+	name   string
+	Params map[string]interface{}
 }
 
 func (d *DefaultDaemon) Registered() {
