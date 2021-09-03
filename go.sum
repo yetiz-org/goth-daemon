@@ -1,11 +1,10 @@
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/kklab-com/goth-kklogger v0.0.0-20210329135227-9693bea481eb/go.mod h1:nbgBjFc1QaE5eQi76hyGNGEhwr+HRjAzRB4zzg7NAmw=
-github.com/kklab-com/goth-kklogger v0.0.0-20210510033105-1f4bb2108d4e h1:teMuKL0X1vRxFvmGNHzITV0MwwaC5O5Hvd+U1OuwpfM=
-github.com/kklab-com/goth-kklogger v0.0.0-20210510033105-1f4bb2108d4e/go.mod h1:nbgBjFc1QaE5eQi76hyGNGEhwr+HRjAzRB4zzg7NAmw=
-github.com/kklab-com/goth-panic v0.0.0-20210427145648-10f0f049f33c h1:yM2lSfLNnxqKdmc0mKDWdnlprStFPSfPm80PkRrOcRw=
-github.com/kklab-com/goth-panic v0.0.0-20210427145648-10f0f049f33c/go.mod h1:LAzKUp0CnY+66MG8lldBXKumPLAEu0tOVNPMCtumx7A=
+github.com/kklab-com/goth-kklogger v1.0.0 h1:zXFPDI10NXm2uFsrcA8PAJercErWOt/646aiAYF7gWY=
+github.com/kklab-com/goth-kklogger v1.0.0/go.mod h1:nbgBjFc1QaE5eQi76hyGNGEhwr+HRjAzRB4zzg7NAmw=
+github.com/kklab-com/goth-panic v1.0.2 h1:YOCZe7MTfmqicRkiuYed9i7ojQLK/NZN2Ceg9csA5m0=
+github.com/kklab-com/goth-panic v1.0.2/go.mod h1:FdgZSwGtF4kEqRO6OgDbzMgnrNKm8fMB6Fn/eORkaAU=
 github.com/konsorten/go-windows-terminal-sequences v1.0.1/go.mod h1:T0+1ngSBFLxvqU3pZ+m/2kptfBszLMUkC4ZK/EgS/cQ=
 github.com/konsorten/go-windows-terminal-sequences v1.0.2 h1:DB17ag19krx9CFsz4o3enTrPXyIXCl+2iCXH/aMAp9s=
 github.com/konsorten/go-windows-terminal-sequences v1.0.2/go.mod h1:T0+1ngSBFLxvqU3pZ+m/2kptfBszLMUkC4ZK/EgS/cQ=
