@@ -188,13 +188,15 @@ func IsShutdown() bool {
 	return shutdown
 }
 
-func ShutdownGracefully(signal os.Signal) {
-	sig <- signal
+func ShutdownGracefully() {
+	sig <- shutdownGracefullySignal
 }
 
 func WaitShutdown() {
 	<-stopWhenKillDone
 }
+
+const shutdownGracefullySignal = syscall.Signal(0xff)
 
 type PanicResult struct {
 	Daemon Daemon
@@ -206,7 +208,7 @@ func init() {
 	go func() {
 		s := <-sig
 		shutdown = true
-		if !AutoStopWhenKill {
+		if !AutoStopWhenKill && s != shutdownGracefullySignal {
 			close(stopWhenKillDone)
 			return
 		}
