@@ -8,14 +8,14 @@ import (
 )
 
 func TestService(t *testing.T) {
-	assert.EqualValues(t, nil, RegisterDaemon("SS", 1, &DefaultDaemon{}))
+	assert.EqualValues(t, nil, RegisterDaemon(1, &DefaultDaemon{name: "SS"}))
 
 	assert.EqualValues(t, 1, GetService("SS").Order)
-	assert.NotNil(t, RegisterDaemon("SS", 2, &DefaultDaemon{}))
+	assert.NotNil(t, RegisterDaemon(2, &DefaultDaemon{name: "SS"}))
 
-	RegisterDaemon("P1", 1, &P1{Daemon: &DefaultDaemon{}})
+	RegisterDaemon(1, &P1{Daemon: &DefaultDaemon{name: "P1"}})
 
-	RegisterDaemon("P2", 2, &P2{Daemon: &DefaultDaemon{}})
+	RegisterDaemon(2, &P2{Daemon: &DefaultDaemon{name: "P2"}})
 
 	RegisterServiceInline("P3", 3, func() {
 		println("start p3")

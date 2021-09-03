@@ -21,7 +21,6 @@ var shutdown = false
 
 type DaemonEntity struct {
 	Daemon Daemon
-	Name   string
 	Order  int
 }
 
@@ -35,43 +34,44 @@ type Daemon interface {
 }
 
 type DefaultDaemon struct {
+	name string
 }
 
-func (s *DefaultDaemon) Registered() {
-
-}
-
-func (s *DefaultDaemon) Start() {
+func (d *DefaultDaemon) Registered() {
 
 }
 
-func (s *DefaultDaemon) Stop(sig os.Signal) {
+func (d *DefaultDaemon) Start() {
 
 }
 
-func (s *DefaultDaemon) Restart() {
+func (d *DefaultDaemon) Stop(sig os.Signal) {
 
 }
 
-func (s *DefaultDaemon) Name() string {
-	return "DefaultDaemon"
+func (d *DefaultDaemon) Restart() {
+
 }
 
-func (s *DefaultDaemon) Info() string {
-	bs, _ := json.Marshal(s)
+func (d *DefaultDaemon) Name() string {
+	return d.name
+}
+
+func (d *DefaultDaemon) Info() string {
+	bs, _ := json.Marshal(d)
 	return string(bs)
 }
 
-func RegisterDaemon(name string, order int, daemon Daemon) error {
+func RegisterDaemon(order int, daemon Daemon) error {
 	if daemon == nil {
 		return fmt.Errorf("nil daemon")
 	}
 
-	if name == "" {
+	if daemon.Name() == "" {
 		return fmt.Errorf("name is empty")
 	}
 
-	if _, loaded := DaemonMap.LoadOrStore(name, &DaemonEntity{Name: name, Order: order, Daemon: daemon}); loaded {
+	if _, loaded := DaemonMap.LoadOrStore(daemon.Name(), &DaemonEntity{Order: order, Daemon: daemon}); loaded {
 		return fmt.Errorf("name is exist")
 	}
 
@@ -83,6 +83,10 @@ type _InlineService struct {
 	DefaultDaemon
 	StartFunc func()
 	StopFunc  func(sig os.Signal)
+}
+
+func (s *_InlineService) Name() string {
+	return s.name
 }
 
 func (s *_InlineService) Start() {
@@ -98,10 +102,12 @@ func (s *_InlineService) Stop(sig os.Signal) {
 }
 
 func RegisterServiceInline(name string, order int, startFunc func(), stopFunc func(sig os.Signal)) error {
-	return RegisterDaemon(name, order, &_InlineService{
-		DefaultDaemon: DefaultDaemon{},
-		StartFunc:     startFunc,
-		StopFunc:      stopFunc,
+	return RegisterDaemon(order, &_InlineService{
+		DefaultDaemon: DefaultDaemon{
+			name: name,
+		},
+		StartFunc: startFunc,
+		StopFunc:  stopFunc,
 	})
 }
 
@@ -128,9 +134,9 @@ func Start() {
 		var caught kkpanic.Caught
 		kkpanic.Try(func() {
 			entity.Daemon.Start()
-			kklogger.InfoJ("daemon.Start", fmt.Sprintf("entity %s started", entity.Name))
+			kklogger.InfoJ("daemon.Start", fmt.Sprintf("entity %s started", entity.Daemon.Name()))
 		}).CatchAll(func(caught kkpanic.Caught) {
-			kklogger.ErrorJ("daemon.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
+			kklogger.ErrorJ("daemon.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Daemon.Name(), caught.String()))
 		})
 
 		if caught != nil {
@@ -157,9 +163,9 @@ func Stop(sig os.Signal) {
 		var caught kkpanic.Caught
 		kkpanic.Try(func() {
 			entity.Daemon.Stop(sig)
-			kklogger.InfoJ("daemon.Stop", fmt.Sprintf("entity %s stopped", entity.Name))
+			kklogger.InfoJ("daemon.Stop", fmt.Sprintf("entity %s stopped", entity.Daemon.Name()))
 		}).CatchAll(func(caught kkpanic.Caught) {
-			kklogger.ErrorJ("daemon.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
+			kklogger.ErrorJ("daemon.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Daemon.Name(), caught.String()))
 		})
 
 		if caught != nil {
