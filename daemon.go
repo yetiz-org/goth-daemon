@@ -30,6 +30,7 @@ type Daemon interface {
 	Start()
 	Stop(sig os.Signal)
 	Restart()
+	Name() string
 	Info() string
 }
 
@@ -50,6 +51,10 @@ func (s *DefaultDaemon) Stop(sig os.Signal) {
 
 func (s *DefaultDaemon) Restart() {
 
+}
+
+func (s *DefaultDaemon) Name() string {
+	return "DefaultDaemon"
 }
 
 func (s *DefaultDaemon) Info() string {
