@@ -19,6 +19,7 @@ var AutoStopWhenKill = true
 var sig = make(chan os.Signal)
 var stopWhenKillDone = make(chan int)
 var shutdown = false
+var shutdownOnce = sync.Once{}
 
 type DaemonEntity struct {
 	Name    string
@@ -197,7 +198,11 @@ func IsShutdown() bool {
 }
 
 func ShutdownGracefully() {
-	sig <- shutdownGracefullySignal
+	shutdownOnce.Do(func() {
+		if !IsShutdown() {
+			sig <- shutdownGracefullySignal
+		}
+	})
 }
 
 func WaitShutdown() {
