@@ -152,6 +152,7 @@ func Start() {
 
 		if c != nil {
 			ShutdownGracefully()
+			return
 		}
 	}
 }
