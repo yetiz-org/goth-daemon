@@ -151,10 +151,7 @@ func Start() {
 		})
 
 		if c != nil {
-			panic(&PanicResult{
-				Daemon: entity.Daemon,
-				Caught: c,
-			})
+			ShutdownGracefully()
 		}
 	}
 }
