@@ -174,18 +174,19 @@ func Stop(sig os.Signal) {
 			continue
 		}
 
-		var caught kkpanic.Caught
+		var c kkpanic.Caught
 		kkpanic.Try(func() {
 			entity.Daemon.Stop(sig)
 			kklogger.InfoJ("daemon.Stop", fmt.Sprintf("entity %s stopped", entity.Name))
 		}).CatchAll(func(caught kkpanic.Caught) {
+			c = caught
 			kklogger.ErrorJ("daemon.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
 		})
 
-		if caught != nil {
+		if c != nil {
 			panic(&PanicResult{
 				Daemon: entity.Daemon,
-				Caught: caught,
+				Caught: c,
 			})
 		}
 	}
