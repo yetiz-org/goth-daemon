@@ -9,6 +9,7 @@ import (
 	"sort"
 	"sync"
 	"syscall"
+	"time"
 
 	kklogger "github.com/kklab-com/goth-kklogger"
 	kkpanic "github.com/kklab-com/goth-panic"
@@ -35,6 +36,14 @@ type Daemon interface {
 	Restart()
 	Name() string
 	Info() string
+}
+
+type TimerDaemon interface {
+	Daemon
+	FireLoopAtStart() bool
+	LoopInterval() time.Duration
+	Loop() error
+	LoopStop(sig os.Signal)
 }
 
 type DefaultDaemon struct {
@@ -66,6 +75,82 @@ func (d *DefaultDaemon) Info() string {
 	return string(bs)
 }
 
+type DefaultTimerDaemon struct {
+	DefaultDaemon
+}
+
+func (d *DefaultTimerDaemon) FireLoopAtStart() bool {
+	return false
+}
+
+func (d *DefaultTimerDaemon) LoopInterval() time.Duration {
+	return time.Minute
+}
+
+func (d *DefaultTimerDaemon) Loop() error {
+	return nil
+}
+
+func (d *DefaultTimerDaemon) LoopStop(sig os.Signal) {
+}
+
+type _TimerDaemonWrapper struct {
+	TimerDaemon
+	stopSig        chan int
+	loopStoppedSig chan int
+	sig            os.Signal
+	state          int
+}
+
+func (d *_TimerDaemonWrapper) Start() {
+	d.stopSig = make(chan int)
+	d.loopStoppedSig = make(chan int)
+	if d.FireLoopAtStart() {
+		if d.state == 0 {
+			d._InvokeLoop()
+		}
+	}
+
+	go func() {
+		for d.state == 0 {
+			timer := time.NewTimer(d._TruncateDuration(d.LoopInterval()))
+			select {
+			case <-timer.C:
+				kkpanic.LogCatch(d._InvokeLoop)
+				timer.Reset(d.LoopInterval())
+			case <-time.After(d.LoopInterval() * 5):
+				timer.Reset(d._TruncateDuration(d.LoopInterval()))
+				continue
+			case <-d.stopSig:
+				d.state = 1
+				d.LoopStop(d.sig)
+				close(d.loopStoppedSig)
+			}
+		}
+	}()
+}
+
+func (d *_TimerDaemonWrapper) _InvokeLoop() {
+	if err := d.Loop(); err != nil {
+		kklogger.ErrorJ(fmt.Sprintf("TimerDaemon.Loop#%s", d.Name()), err.Error())
+	}
+}
+
+func (d *_TimerDaemonWrapper) Stop(sig os.Signal) {
+	d.sig = sig
+	if d.stopSig != nil {
+		close(d.stopSig)
+	}
+
+	if d.loopStoppedSig != nil {
+		<-d.loopStoppedSig
+	}
+}
+
+func (d *_TimerDaemonWrapper) _TruncateDuration(interval time.Duration) time.Duration {
+	return time.Now().Truncate(interval).Add(interval).Sub(time.Now())
+}
+
 func RegisterDaemon(order int, daemon Daemon) error {
 	if daemon == nil {
 		return fmt.Errorf("nil daemon")
@@ -78,6 +163,12 @@ func RegisterDaemon(order int, daemon Daemon) error {
 
 	if name == "" {
 		return fmt.Errorf("name is empty")
+	}
+
+	if td, ok := daemon.(TimerDaemon); ok {
+		daemon = &_TimerDaemonWrapper{
+			TimerDaemon: td,
+		}
 	}
 
 	if _, loaded := DaemonMap.LoadOrStore(name, &DaemonEntity{Name: name, Order: order, Daemon: daemon}); loaded {
