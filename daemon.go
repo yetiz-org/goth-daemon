@@ -21,6 +21,7 @@ var stopWhenKillDone = make(chan int)
 var shutdown = false
 
 type DaemonEntity struct {
+	Name    string
 	Daemon  Daemon
 	Order   int
 	started bool
@@ -78,7 +79,7 @@ func RegisterDaemon(order int, daemon Daemon) error {
 		return fmt.Errorf("name is empty")
 	}
 
-	if _, loaded := DaemonMap.LoadOrStore(name, &DaemonEntity{Order: order, Daemon: daemon}); loaded {
+	if _, loaded := DaemonMap.LoadOrStore(name, &DaemonEntity{Name: name, Order: order, Daemon: daemon}); loaded {
 		return fmt.Errorf("name is exist")
 	}
 
@@ -142,10 +143,10 @@ func Start() {
 		kkpanic.Try(func() {
 			entity.Daemon.Start()
 			entity.started = true
-			kklogger.InfoJ("daemon.Start", fmt.Sprintf("entity %s started", entity.Daemon.Name()))
+			kklogger.InfoJ("daemon.Start", fmt.Sprintf("entity %s started", entity.Name))
 		}).CatchAll(func(caught kkpanic.Caught) {
 			c = caught
-			kklogger.ErrorJ("daemon.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Daemon.Name(), caught.String()))
+			kklogger.ErrorJ("daemon.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
 		})
 
 		if c != nil {
@@ -176,9 +177,9 @@ func Stop(sig os.Signal) {
 		var caught kkpanic.Caught
 		kkpanic.Try(func() {
 			entity.Daemon.Stop(sig)
-			kklogger.InfoJ("daemon.Stop", fmt.Sprintf("entity %s stopped", entity.Daemon.Name()))
+			kklogger.InfoJ("daemon.Stop", fmt.Sprintf("entity %s stopped", entity.Name))
 		}).CatchAll(func(caught kkpanic.Caught) {
-			kklogger.ErrorJ("daemon.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Daemon.Name(), caught.String()))
+			kklogger.ErrorJ("daemon.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
 		})
 
 		if caught != nil {
