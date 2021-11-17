@@ -1,25 +1,32 @@
 package kkdaemon
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
 	"reflect"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	kklogger "github.com/kklab-com/goth-kklogger"
+	"github.com/kklab-com/goth-kkutil/concurrent"
 	kkpanic "github.com/kklab-com/goth-panic"
 )
 
 var DaemonMap = sync.Map{}
 var AutoStopWhenKill = true
 var sig = make(chan os.Signal)
-var stopWhenKillDone = make(chan int)
+var stopWhenKillDoneFuture = concurrent.NewFuture(nil)
 var shutdown = false
 var shutdownOnce = sync.Once{}
+
+const StateWait = int32(0)
+const StateRun = int32(1)
+const StateStop = int32(2)
+
+const shutdownGracefullySignal = syscall.Signal(0xff)
 
 type DaemonEntity struct {
 	Name    string
@@ -30,20 +37,25 @@ type DaemonEntity struct {
 
 type Daemon interface {
 	Registered() error
+	State() int32
 	Start()
 	Stop(sig os.Signal)
-	Restart()
 	Name() string
-	Info() string
+	_State() *int32
 }
 
 type DefaultDaemon struct {
 	name   string
+	state  int32
 	Params map[string]interface{}
 }
 
 func (d *DefaultDaemon) Registered() error {
 	return nil
+}
+
+func (d *DefaultDaemon) State() int32 {
+	return d.state
 }
 
 func (d *DefaultDaemon) Start() {
@@ -54,17 +66,12 @@ func (d *DefaultDaemon) Stop(sig os.Signal) {
 
 }
 
-func (d *DefaultDaemon) Restart() {
-
-}
-
 func (d *DefaultDaemon) Name() string {
 	return d.name
 }
 
-func (d *DefaultDaemon) Info() string {
-	bs, _ := json.Marshal(d)
-	return string(bs)
+func (d *DefaultDaemon) _State() *int32 {
+	return &d.state
 }
 
 func RegisterDaemon(order int, daemon Daemon) error {
@@ -85,6 +92,11 @@ func RegisterDaemon(order int, daemon Daemon) error {
 		return fmt.Errorf("name is exist")
 	}
 
+	if cast, ok := daemon.(TimerDaemon); ok {
+		cast.prepare()
+	}
+
+	atomic.StoreInt32(daemon._State(), StateWait)
 	return daemon.Registered()
 }
 
@@ -142,12 +154,22 @@ func Start() {
 	for _, entity := range el {
 		var c kkpanic.Caught
 		kkpanic.Try(func() {
-			entity.Daemon.Start()
+			if !atomic.CompareAndSwapInt32(entity.Daemon._State(), StateWait, StateRun) {
+				kklogger.ErrorJ("kkdaemon.Start", fmt.Sprintf("%s not in WAIT state", entity.Daemon.Name()))
+				return
+			}
+
+			if daemon, ok := entity.Daemon.(TimerDaemon); ok {
+				timerDaemonStart(daemon)
+			} else {
+				kkpanic.LogCatch(entity.Daemon.Start)
+			}
+
 			entity.started = true
-			kklogger.InfoJ("daemon.Start", fmt.Sprintf("entity %s started", entity.Name))
+			kklogger.InfoJ("kkdaemon.Start", fmt.Sprintf("entity %s started", entity.Name))
 		}).CatchAll(func(caught kkpanic.Caught) {
 			c = caught
-			kklogger.ErrorJ("daemon.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
+			kklogger.ErrorJ("kkdaemon.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
 		})
 
 		if c != nil {
@@ -175,11 +197,21 @@ func Stop(sig os.Signal) {
 
 		var c kkpanic.Caught
 		kkpanic.Try(func() {
-			entity.Daemon.Stop(sig)
-			kklogger.InfoJ("daemon.Stop", fmt.Sprintf("entity %s stopped", entity.Name))
+			if !atomic.CompareAndSwapInt32(entity.Daemon._State(), StateRun, StateStop) {
+				kklogger.ErrorJ("kkdaemon.Stop", fmt.Sprintf("%s not in RUN state", entity.Daemon.Name()))
+				return
+			}
+
+			if daemon, ok := entity.Daemon.(TimerDaemon); ok {
+				timerDaemonStop(daemon, sig)
+			} else {
+				entity.Daemon.Stop(sig)
+			}
+
+			kklogger.InfoJ("kkdaemon.Stop", fmt.Sprintf("entity %s stopped", entity.Name))
 		}).CatchAll(func(caught kkpanic.Caught) {
 			c = caught
-			kklogger.ErrorJ("daemon.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
+			kklogger.ErrorJ("kkdaemon.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
 		})
 
 		if c != nil {
@@ -204,10 +236,12 @@ func ShutdownGracefully() {
 }
 
 func WaitShutdown() {
-	<-stopWhenKillDone
+	stopWhenKillDoneFuture.Await()
 }
 
-const shutdownGracefullySignal = syscall.Signal(0xff)
+func ShutdownDone() concurrent.Future {
+	return stopWhenKillDoneFuture
+}
 
 type PanicResult struct {
 	Daemon Daemon
@@ -220,7 +254,7 @@ func init() {
 		s := <-sig
 		shutdown = true
 		if !AutoStopWhenKill && s != shutdownGracefullySignal {
-			close(stopWhenKillDone)
+			stopWhenKillDoneFuture.Completable().Complete(s)
 			return
 		}
 
@@ -228,6 +262,6 @@ func init() {
 		kklogger.InfoJ("kkdaemon:AutoStopWhenKill", msg)
 		Stop(s)
 		kklogger.InfoJ("kkdaemon:AutoStopWhenKill", "Done")
-		close(stopWhenKillDone)
+		stopWhenKillDoneFuture.Completable().Complete(s)
 	}()
 }
