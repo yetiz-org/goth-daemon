@@ -54,7 +54,7 @@ func (d *DefaultTimerDaemon) loopStoppedFuture() concurrent.Future {
 
 func timerDaemonStart(daemon TimerDaemon) {
 	daemon.prepare()
-	kkpanic.LogCatch(daemon.Start)
+	daemon.Start()
 	go func(daemon TimerDaemon) {
 		for daemon.State() == StateRun {
 			timer := time.NewTimer(truncateDuration(daemon.Interval()))

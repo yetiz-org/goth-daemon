@@ -162,7 +162,7 @@ func Start() {
 			if daemon, ok := entity.Daemon.(TimerDaemon); ok {
 				timerDaemonStart(daemon)
 			} else {
-				kkpanic.LogCatch(entity.Daemon.Start)
+				entity.Daemon.Start()
 			}
 
 			entity.started = true
