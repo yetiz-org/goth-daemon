@@ -55,7 +55,8 @@ func timerDaemonStart(daemon TimerDaemon) {
 	daemon.prepare()
 	daemon.Start()
 	go func(daemon TimerDaemon) {
-		timer := time.NewTimer(time.Nanosecond)
+		timer := time.NewTimer(time.Minute)
+		timer.Stop()
 		for daemon.State() == StateRun {
 			nextInterval := daemon.Interval()
 			timer.Reset(truncateDuration(nextInterval))
