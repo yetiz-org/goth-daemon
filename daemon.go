@@ -44,6 +44,10 @@ type Daemon interface {
 	_State() *int32
 }
 
+type daemonSetName interface {
+	setName(name string)
+}
+
 type DefaultDaemon struct {
 	name   string
 	state  int32
@@ -66,6 +70,10 @@ func (d *DefaultDaemon) Stop(sig os.Signal) {
 
 }
 
+func (d *DefaultDaemon) setName(name string) {
+	d.name = name
+}
+
 func (d *DefaultDaemon) Name() string {
 	return d.name
 }
@@ -86,6 +94,12 @@ func RegisterDaemon(order int, daemon Daemon) error {
 
 	if name == "" {
 		return fmt.Errorf("name is empty")
+	}
+
+	if daemon.Name() != name {
+		if cast, ok := daemon.(daemonSetName); ok {
+			cast.setName(name)
+		}
 	}
 
 	if _, loaded := DaemonMap.LoadOrStore(name, &DaemonEntity{Name: name, Order: order, Daemon: daemon}); loaded {

@@ -19,6 +19,7 @@ func TestTimerDaemon(t *testing.T) {
 	<-time.After(time.Second)
 	assert.True(t, daemon.loop > 10)
 	Stop(syscall.SIGKILL)
+	assert.Equal(t, "testTimerDaemon", daemon.Name())
 	assert.Equal(t, 1, daemon.stop)
 }
 
