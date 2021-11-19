@@ -3,7 +3,6 @@ package kkdaemon
 import (
 	"fmt"
 	"os"
-	"sync/atomic"
 	"time"
 
 	kklogger "github.com/kklab-com/goth-kklogger"
@@ -62,7 +61,6 @@ func timerDaemonStart(daemon TimerDaemon) {
 			case <-daemon.stopFuture().Done():
 				daemon.Stop(daemon.stopFuture().Get().(os.Signal))
 				daemon.loopStoppedFuture().Completable().Complete(daemon.stopFuture().Get())
-				atomic.StoreInt32(daemon._State(), StateWait)
 			case <-timer.C:
 				kkpanic.LogCatch(func() {
 					if err := daemon.Loop(); err != nil {
