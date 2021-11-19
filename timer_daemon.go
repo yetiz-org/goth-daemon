@@ -55,8 +55,10 @@ func timerDaemonStart(daemon TimerDaemon) {
 	daemon.prepare()
 	daemon.Start()
 	go func(daemon TimerDaemon) {
+		timer := time.NewTimer(time.Nanosecond)
 		for daemon.State() == StateRun {
-			timer := time.NewTimer(truncateDuration(daemon.Interval()))
+			nextInterval := daemon.Interval()
+			timer.Reset(truncateDuration(nextInterval))
 			select {
 			case <-daemon.stopFuture().Done():
 				daemon.Stop(daemon.stopFuture().Get().(os.Signal))
@@ -68,9 +70,7 @@ func timerDaemonStart(daemon TimerDaemon) {
 					}
 				})
 
-				timer.Reset(truncateDuration(daemon.Interval()))
-			case <-time.After(daemon.Interval() * 5):
-				timer.Reset(truncateDuration(daemon.Interval()))
+			case <-time.After(nextInterval * 5):
 				continue
 			}
 		}
