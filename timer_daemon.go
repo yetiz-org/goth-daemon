@@ -70,7 +70,7 @@ func timerDaemonStart(daemon TimerDaemon) {
 					}
 				})
 
-				timer.Reset(daemon.Interval())
+				timer.Reset(truncateDuration(daemon.Interval()))
 			case <-time.After(daemon.Interval() * 5):
 				timer.Reset(truncateDuration(daemon.Interval()))
 				continue
