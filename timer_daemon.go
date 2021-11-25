@@ -66,11 +66,11 @@ func timerDaemonStart(daemon TimerDaemon) {
 				daemon.loopStoppedFuture().Completable().Complete(daemon.stopFuture().Get())
 			case <-timer.C:
 				kkpanic.LogCatch(func() {
-					kklogger.DebugJ("kkdaemon.TimerDaemonLoop#Run", daemon.Name())
+					kklogger.TraceJ("kkdaemon.TimerDaemonLoop#Run", daemon.Name())
 					if err := daemon.Loop(); err != nil {
 						kklogger.ErrorJ(fmt.Sprintf("kkdaemon.TimerDaemonLoop#%s", daemon.Name()), err.Error())
 					} else {
-						kklogger.DebugJ("kkdaemon.TimerDaemonLoop#Done", daemon.Name())
+						kklogger.TraceJ("kkdaemon.TimerDaemonLoop#Done", daemon.Name())
 					}
 				})
 
