@@ -74,23 +74,23 @@ func (d *DefaultDaemon) _State() *int32 {
 	return &d.state
 }
 
-type _InlineService struct {
+type _SimpleDaemon struct {
 	DefaultDaemon
 	StartFunc func()
 	StopFunc  func(sig os.Signal)
 }
 
-func (s *_InlineService) Name() string {
+func (s *_SimpleDaemon) Name() string {
 	return s.name
 }
 
-func (s *_InlineService) Start() {
+func (s *_SimpleDaemon) Start() {
 	if s.StartFunc != nil {
 		s.StartFunc()
 	}
 }
 
-func (s *_InlineService) Stop(sig os.Signal) {
+func (s *_SimpleDaemon) Stop(sig os.Signal) {
 	if s.StopFunc != nil {
 		s.StopFunc(sig)
 	}
@@ -100,8 +100,8 @@ func RegisterDaemon(daemon Daemon) error {
 	return DefaultService.RegisterDaemon(daemon)
 }
 
-func RegisterServiceInline(name string, startFunc func(), stopFunc func(sig os.Signal)) error {
-	return RegisterDaemon(&_InlineService{
+func RegisterSimpleDaemon(name string, startFunc func(), stopFunc func(sig os.Signal)) error {
+	return RegisterDaemon(&_SimpleDaemon{
 		DefaultDaemon: DefaultDaemon{
 			name: name,
 		},

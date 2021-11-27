@@ -15,7 +15,7 @@ func TestService(t *testing.T) {
 	assert.Nil(t, RegisterDaemon(&P1{Daemon: &DefaultDaemon{}}))
 	p2 := &P2{Daemon: &DefaultDaemon{}}
 	assert.Nil(t, RegisterDaemon(p2))
-	RegisterServiceInline("P3", func() {
+	RegisterSimpleDaemon("P3", func() {
 		println("start p3")
 	}, func(sig os.Signal) {
 		println("stop p3")

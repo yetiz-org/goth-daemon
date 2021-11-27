@@ -14,6 +14,7 @@ import (
 	kklogger "github.com/kklab-com/goth-kklogger"
 	"github.com/kklab-com/goth-kkutil/concurrent"
 	kkpanic "github.com/kklab-com/goth-panic"
+	"github.com/robfig/cron/v3"
 )
 
 type DaemonService struct {
@@ -106,19 +107,8 @@ func (s *DaemonService) startDaemon(entity *DaemonEntity) {
 	atomic.StoreInt32(entity.Daemon._State(), StateRun)
 	entity.Daemon.Start()
 	atomic.StoreInt32(entity.Daemon._State(), StateStart)
-	if daemon := s.getTimerDaemon(entity); daemon != nil {
-		entity.Next = intervalGetNext(daemon.Interval(), time.Now())
-	}
-
+	s.entitySetNext(entity)
 	kklogger.InfoJ("DaemonService.startDaemon", fmt.Sprintf("entity %s started", entity.Name))
-}
-
-func (s *DaemonService) getTimerDaemon(entity *DaemonEntity) TimerDaemon {
-	if daemon, ok := entity.Daemon.(TimerDaemon); ok {
-		return daemon
-	}
-
-	return nil
 }
 
 func (s *DaemonService) invokeLoopDaemon() {
@@ -136,26 +126,26 @@ func (s *DaemonService) invokeLoopDaemon() {
 			for _, entity := range s.getOrderedDaemonEntitySlice() {
 				now = time.Now()
 				if !entity.Next.After(now) {
-					if daemon := s.getTimerDaemon(entity); daemon != nil {
-						if atomic.CompareAndSwapInt32(daemon._State(), StateStart, StateRun) {
-							go func(entity *DaemonEntity, daemon TimerDaemon) {
+					if atomic.CompareAndSwapInt32(entity.Daemon._State(), StateStart, StateRun) {
+						go func(entity *DaemonEntity) {
+							if looper, ok := entity.Daemon.(Looper); ok {
 								kkpanic.LogCatch(func() {
-									kklogger.TraceJ("DaemonService.invokeLoopDaemon#Run", daemon.Name())
-									if err := daemon.Loop(); err != nil {
-										kklogger.ErrorJ(fmt.Sprintf("DaemonService.invokeLoopDaemon#Err!%s", daemon.Name()), err.Error())
+									kklogger.TraceJ("DaemonService.invokeLoopDaemon#Run", entity.Name)
+									if err := looper.Loop(); err != nil {
+										kklogger.ErrorJ(fmt.Sprintf("DaemonService.invokeLoopDaemon#Err!%s", entity.Name), err.Error())
 									} else {
-										kklogger.TraceJ("DaemonService.invokeLoopDaemon#Done", daemon.Name())
+										kklogger.TraceJ("DaemonService.invokeLoopDaemon#Done", entity.Name)
 									}
 								})
+							}
+						}(entity)
 
-								atomic.StoreInt32(daemon._State(), StateStart)
-							}(entity, daemon)
-						}
-
-						entity.Next = intervalGetNext(daemon.Interval(), time.Now())
+						s.entitySetNext(entity)
 						if next.After(entity.Next) {
 							next = entity.Next
 						}
+
+						atomic.StoreInt32(entity.Daemon._State(), StateStart)
 					}
 				} else {
 					if next.After(entity.Next) {
@@ -177,10 +167,20 @@ func (s *DaemonService) invokeLoopDaemon() {
 	}()
 }
 
+func (s *DaemonService) entitySetNext(entity *DaemonEntity) {
+	switch daemon := entity.Daemon.(type) {
+	case TimerDaemon:
+		entity.Next = intervalGetNext(daemon.Interval(), time.Now())
+	case SchedulerDaemon:
+		entity.Next = whenGetNext(daemon.When(), time.Now())
+	}
+}
+
 func (s *DaemonService) getOrderedDaemonEntitySlice() []*DaemonEntity {
 	var el []*DaemonEntity
 	s.DaemonMap.Range(func(key, value interface{}) bool {
-		if s.getTimerDaemon(value.(*DaemonEntity)) != nil {
+		switch value.(*DaemonEntity).Daemon.(type) {
+		case TimerDaemon, SchedulerDaemon:
 			el = append(el, value.(*DaemonEntity))
 		}
 
@@ -305,4 +305,12 @@ func (s *DaemonService) judgeStopWhenKill() {
 
 func intervalGetNext(interval time.Duration, from time.Time) time.Time {
 	return from.Truncate(interval).Add(interval)
+}
+
+func whenGetNext(when CronSyntax, from time.Time) time.Time {
+	if schedule, err := cron.ParseStandard(string(when)); err != nil {
+		panic(fmt.Sprintf("%s can't be parsed.", when))
+	} else {
+		return schedule.Next(from)
+	}
 }

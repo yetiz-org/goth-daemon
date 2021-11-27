@@ -4,10 +4,14 @@ import (
 	"time"
 )
 
+type Looper interface {
+	Loop() error
+}
+
 type TimerDaemon interface {
 	Daemon
+	Looper
 	Interval() time.Duration
-	Loop() error
 }
 
 type DefaultTimerDaemon struct {
