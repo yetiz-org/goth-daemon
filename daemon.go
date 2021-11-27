@@ -1,38 +1,30 @@
 package kkdaemon
 
 import (
-	"fmt"
 	"os"
-	"os/signal"
-	"reflect"
-	"sort"
-	"sync"
-	"sync/atomic"
 	"syscall"
+	"time"
 
-	kklogger "github.com/kklab-com/goth-kklogger"
 	"github.com/kklab-com/goth-kkutil/concurrent"
 	kkpanic "github.com/kklab-com/goth-panic"
 )
 
-var DaemonMap = sync.Map{}
-var AutoStopWhenKill = true
-var sig = make(chan os.Signal)
-var stopWhenKillDoneFuture = concurrent.NewFuture(nil)
-var shutdown = false
-var shutdownOnce = sync.Once{}
+var DefaultService = NewDaemonService()
 
 const StateWait = int32(0)
-const StateRun = int32(1)
-const StateStop = int32(2)
-
+const StateStart = int32(1)
+const StateRun = int32(2)
+const StateStop = int32(3)
 const shutdownGracefullySignal = syscall.Signal(0xff)
+const unregisterSignal = syscall.Signal(0xfe)
+
+var _MaxTime = time.Unix(1<<63-62135596801, 999999999)
 
 type DaemonEntity struct {
-	Name    string
-	Daemon  Daemon
-	Order   int
-	started bool
+	Name   string
+	Daemon Daemon
+	Order  int
+	Next   time.Time
 }
 
 type Daemon interface {
@@ -82,38 +74,6 @@ func (d *DefaultDaemon) _State() *int32 {
 	return &d.state
 }
 
-func RegisterDaemon(order int, daemon Daemon) error {
-	if daemon == nil {
-		return fmt.Errorf("nil daemon")
-	}
-
-	name := daemon.Name()
-	if name == "" {
-		name = reflect.TypeOf(daemon).Elem().Name()
-	}
-
-	if name == "" {
-		return fmt.Errorf("name is empty")
-	}
-
-	if daemon.Name() != name {
-		if cast, ok := daemon.(daemonSetName); ok {
-			cast.setName(name)
-		}
-	}
-
-	if _, loaded := DaemonMap.LoadOrStore(name, &DaemonEntity{Name: name, Order: order, Daemon: daemon}); loaded {
-		return fmt.Errorf("name is exist")
-	}
-
-	if cast, ok := daemon.(TimerDaemon); ok {
-		cast.prepare()
-	}
-
-	atomic.StoreInt32(daemon._State(), StateWait)
-	return daemon.Registered()
-}
-
 type _InlineService struct {
 	DefaultDaemon
 	StartFunc func()
@@ -136,8 +96,12 @@ func (s *_InlineService) Stop(sig os.Signal) {
 	}
 }
 
-func RegisterServiceInline(name string, order int, startFunc func(), stopFunc func(sig os.Signal)) error {
-	return RegisterDaemon(order, &_InlineService{
+func RegisterDaemon(daemon Daemon) error {
+	return DefaultService.RegisterDaemon(daemon)
+}
+
+func RegisterServiceInline(name string, startFunc func(), stopFunc func(sig os.Signal)) error {
+	return RegisterDaemon(&_InlineService{
 		DefaultDaemon: DefaultDaemon{
 			name: name,
 		},
@@ -146,136 +110,35 @@ func RegisterServiceInline(name string, order int, startFunc func(), stopFunc fu
 	})
 }
 
-func GetService(name string) *DaemonEntity {
-	if v, f := DaemonMap.Load(name); f {
-		return v.(*DaemonEntity)
-	}
+func GetDaemon(name string) *DaemonEntity {
+	return DefaultService.GetDaemon(name)
+}
 
-	return nil
+func UnregisterDaemon(name string) error {
+	return DefaultService.UnregisterDaemon(name)
 }
 
 func Start() {
-	var el []*DaemonEntity
-	DaemonMap.Range(func(key, value interface{}) bool {
-		el = append(el, value.(*DaemonEntity))
-		return true
-	})
-
-	sort.Slice(el, func(i, j int) bool {
-		return el[i].Order < el[j].Order
-	})
-
-	for _, entity := range el {
-		var c kkpanic.Caught
-		kkpanic.Try(func() {
-			if !atomic.CompareAndSwapInt32(entity.Daemon._State(), StateWait, StateRun) {
-				kklogger.ErrorJ("kkdaemon.Start", fmt.Sprintf("%s not in WAIT state", entity.Daemon.Name()))
-				return
-			}
-
-			if daemon, ok := entity.Daemon.(TimerDaemon); ok {
-				timerDaemonStart(daemon)
-			} else {
-				entity.Daemon.Start()
-			}
-
-			entity.started = true
-			kklogger.InfoJ("kkdaemon.Start", fmt.Sprintf("entity %s started", entity.Name))
-		}).CatchAll(func(caught kkpanic.Caught) {
-			c = caught
-			kklogger.ErrorJ("kkdaemon.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
-		})
-
-		if c != nil {
-			ShutdownGracefully()
-			return
-		}
-	}
+	DefaultService.Start()
 }
 
 func Stop(sig os.Signal) {
-	var el []*DaemonEntity
-	DaemonMap.Range(func(key, value interface{}) bool {
-		el = append(el, value.(*DaemonEntity))
-		return true
-	})
-
-	sort.Slice(el, func(i, j int) bool {
-		return el[i].Order > el[j].Order
-	})
-
-	for _, entity := range el {
-		if !entity.started {
-			continue
-		}
-
-		var c kkpanic.Caught
-		kkpanic.Try(func() {
-			if !atomic.CompareAndSwapInt32(entity.Daemon._State(), StateRun, StateStop) {
-				kklogger.ErrorJ("kkdaemon.Stop", fmt.Sprintf("%s not in RUN state", entity.Daemon.Name()))
-				return
-			}
-
-			if daemon, ok := entity.Daemon.(TimerDaemon); ok {
-				timerDaemonStop(daemon, sig)
-			} else {
-				entity.Daemon.Stop(sig)
-			}
-
-			kklogger.InfoJ("kkdaemon.Stop", fmt.Sprintf("entity %s stopped", entity.Name))
-		}).CatchAll(func(caught kkpanic.Caught) {
-			c = caught
-			kklogger.ErrorJ("kkdaemon.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
-		})
-
-		if c != nil {
-			panic(&PanicResult{
-				Daemon: entity.Daemon,
-				Caught: c,
-			})
-		}
-	}
+	DefaultService.Stop(sig)
 }
 
 func IsShutdown() bool {
-	return shutdown
+	return DefaultService.IsShutdown()
 }
 
 func ShutdownGracefully() {
-	shutdownOnce.Do(func() {
-		if !IsShutdown() {
-			sig <- shutdownGracefullySignal
-		}
-	})
+	DefaultService.ShutdownGracefully()
 }
 
-func WaitShutdown() {
-	stopWhenKillDoneFuture.Await()
-}
-
-func ShutdownDone() concurrent.Future {
-	return stopWhenKillDoneFuture
+func ShutdownFuture() concurrent.Future {
+	return DefaultService.ShutdownFuture()
 }
 
 type PanicResult struct {
 	Daemon Daemon
 	Caught kkpanic.Caught
-}
-
-func init() {
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGTERM, syscall.SIGHUP)
-	go func() {
-		s := <-sig
-		shutdown = true
-		if !AutoStopWhenKill && s != shutdownGracefullySignal {
-			stopWhenKillDoneFuture.Completable().Complete(s)
-			return
-		}
-
-		msg := fmt.Sprintf("SIGNAL: %s, SHUTDOWN CATCH", s.String())
-		kklogger.InfoJ("kkdaemon:AutoStopWhenKill", msg)
-		Stop(s)
-		kklogger.InfoJ("kkdaemon:AutoStopWhenKill", "Done")
-		stopWhenKillDoneFuture.Completable().Complete(s)
-	}()
 }

@@ -6,8 +6,8 @@ github.com/google/uuid v1.1.1/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+
 github.com/kklab-com/goth-base62 v1.0.0/go.mod h1:zVOUVB/1H/vmOnZHOovnOXaJ9hpRTgSx0Sv63v0xaDI=
 github.com/kklab-com/goth-kklogger v1.0.1 h1:4QI3yr8PvaDsO3+6WB5FUcuNTQU6YN7R/AfMDv1Seno=
 github.com/kklab-com/goth-kklogger v1.0.1/go.mod h1:rY/H6dS74JsWiiJQXiFBIy9Tru6kL67e/iu+4PX8QOk=
-github.com/kklab-com/goth-kkutil v1.0.12 h1:4BVyTDvqnEdcM1+ost4n0cjfwvooZqwe+rP2QN4FyQ8=
-github.com/kklab-com/goth-kkutil v1.0.12/go.mod h1:eEWfCIlXa/Fz/55CCl4XiuL1yG3mstVmmIuTHvn4UAI=
+github.com/kklab-com/goth-kkutil v1.0.13 h1:QTPfsfdBxzvp73WCfnlvojngPfI03keV96ePkl/SUZo=
+github.com/kklab-com/goth-kkutil v1.0.13/go.mod h1:eEWfCIlXa/Fz/55CCl4XiuL1yG3mstVmmIuTHvn4UAI=
 github.com/kklab-com/goth-panic v1.0.3 h1:y7nvX7dXz9FXHDtciEjqbM4eY/zYZYTerZ2Ijf7TxZA=
 github.com/kklab-com/goth-panic v1.0.3/go.mod h1:dgrGkVi+i2nIz1Yqf5UTiasAhSC/wskD+hHzsvmdU5Q=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
