@@ -33,8 +33,8 @@ type testTimerDaemon struct {
 	stop  int
 }
 
-func (d *testTimerDaemon) Interval() Interval {
-	return Interval(time.Millisecond * 10)
+func (d *testTimerDaemon) Interval() time.Duration {
+	return time.Millisecond * 10
 }
 
 func (d *testTimerDaemon) Start() {
@@ -57,8 +57,8 @@ type testTimerDaemon2 struct {
 	stop  int
 }
 
-func (d *testTimerDaemon2) Interval() Interval {
-	return Interval(time.Millisecond * 50)
+func (d *testTimerDaemon2) Interval() time.Duration {
+	return time.Millisecond * 50
 }
 
 func (d *testTimerDaemon2) Start() {

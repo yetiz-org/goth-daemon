@@ -4,16 +4,6 @@ import (
 	"time"
 )
 
-type Interval time.Duration
-
-func (c Interval) Next(from time.Time) time.Time {
-	return from.Truncate(time.Duration(c)).Add(time.Duration(c))
-}
-
-func (c Interval) Duration() time.Duration {
-	return time.Duration(c)
-}
-
 type Looper interface {
 	Loop() error
 }
@@ -21,15 +11,15 @@ type Looper interface {
 type TimerDaemon interface {
 	Daemon
 	Looper
-	Interval() Interval
+	Interval() time.Duration
 }
 
 type DefaultTimerDaemon struct {
 	DefaultDaemon
 }
 
-func (d *DefaultTimerDaemon) Interval() Interval {
-	return Interval(time.Minute)
+func (d *DefaultTimerDaemon) Interval() time.Duration {
+	return time.Minute
 }
 
 func (d *DefaultTimerDaemon) Loop() error {

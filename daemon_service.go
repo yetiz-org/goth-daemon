@@ -169,7 +169,8 @@ func (s *DaemonService) invokeLoopDaemon() {
 func (s *DaemonService) entitySetNext(entity *DaemonEntity) {
 	switch daemon := entity.Daemon.(type) {
 	case TimerDaemon:
-		entity.Next = daemon.Interval().Next(time.Now())
+		interval := daemon.Interval()
+		entity.Next = time.Now().Truncate(interval).Add(interval)
 	case SchedulerDaemon:
 		entity.Next = daemon.When().Next(time.Now())
 	}
