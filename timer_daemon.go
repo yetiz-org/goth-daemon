@@ -10,6 +10,10 @@ func (c Interval) Next(from time.Time) time.Time {
 	return from.Truncate(time.Duration(c)).Add(time.Duration(c))
 }
 
+func (c Interval) Duration() time.Duration {
+	return time.Duration(c)
+}
+
 type Looper interface {
 	Loop() error
 }
