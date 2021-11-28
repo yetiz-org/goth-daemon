@@ -14,7 +14,6 @@ import (
 	kklogger "github.com/kklab-com/goth-kklogger"
 	"github.com/kklab-com/goth-kkutil/concurrent"
 	kkpanic "github.com/kklab-com/goth-panic"
-	"github.com/robfig/cron/v3"
 )
 
 type DaemonService struct {
@@ -170,9 +169,9 @@ func (s *DaemonService) invokeLoopDaemon() {
 func (s *DaemonService) entitySetNext(entity *DaemonEntity) {
 	switch daemon := entity.Daemon.(type) {
 	case TimerDaemon:
-		entity.Next = intervalGetNext(daemon.Interval(), time.Now())
+		entity.Next = daemon.Interval().Next(time.Now())
 	case SchedulerDaemon:
-		entity.Next = whenGetNext(daemon.When(), time.Now())
+		entity.Next = daemon.When().Next(time.Now())
 	}
 }
 
@@ -301,16 +300,4 @@ func (s *DaemonService) judgeStopWhenKill() {
 		kklogger.InfoJ("DaemonService:judgeStopWhenKill", "Done")
 		s.shutdownFuture.Completable().Complete(sig)
 	}()
-}
-
-func intervalGetNext(interval time.Duration, from time.Time) time.Time {
-	return from.Truncate(interval).Add(interval)
-}
-
-func whenGetNext(when CronSyntax, from time.Time) time.Time {
-	if schedule, err := cron.ParseStandard(string(when)); err != nil {
-		panic(fmt.Sprintf("%s can't be parsed.", when))
-	} else {
-		return schedule.Next(from)
-	}
 }

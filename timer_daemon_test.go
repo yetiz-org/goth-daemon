@@ -18,6 +18,7 @@ func TestTimerDaemon(t *testing.T) {
 	assert.Equal(t, 1, daemon.start)
 	<-time.After(time.Second * 1)
 	assert.True(t, daemon.loop > 70)
+	assert.True(t, daemon.loop < 110)
 	assert.True(t, daemon2.loop > 15)
 	Stop(syscall.SIGKILL)
 	assert.Equal(t, "testTimerDaemon", daemon.Name())
@@ -32,8 +33,8 @@ type testTimerDaemon struct {
 	stop  int
 }
 
-func (d *testTimerDaemon) Interval() time.Duration {
-	return time.Millisecond * 10
+func (d *testTimerDaemon) Interval() Interval {
+	return Interval(time.Millisecond * 10)
 }
 
 func (d *testTimerDaemon) Start() {
@@ -56,8 +57,8 @@ type testTimerDaemon2 struct {
 	stop  int
 }
 
-func (d *testTimerDaemon2) Interval() time.Duration {
-	return time.Millisecond * 50
+func (d *testTimerDaemon2) Interval() Interval {
+	return Interval(time.Millisecond * 50)
 }
 
 func (d *testTimerDaemon2) Start() {
