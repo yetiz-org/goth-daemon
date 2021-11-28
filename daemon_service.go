@@ -278,9 +278,7 @@ func (s *DaemonService) IsShutdown() bool {
 
 func (s *DaemonService) ShutdownGracefully() {
 	if atomic.CompareAndSwapInt32(&s.shutdownState, 0, 1) {
-		if !s.IsShutdown() {
-			s.sig <- shutdownGracefullySignal
-		}
+		s.sig <- shutdownGracefullySignal
 	}
 }
 
