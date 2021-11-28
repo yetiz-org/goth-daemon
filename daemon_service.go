@@ -287,8 +287,9 @@ func (s *DaemonService) ShutdownFuture() concurrent.Future {
 }
 
 func (s *DaemonService) judgeStopWhenKill() {
-	go func() {
+	go func(s *DaemonService) {
 		sig := <-s.sig
+		s.shutdownState = 1
 		if !s.StopWhenKill && sig != shutdownGracefullySignal {
 			s.shutdownFuture.Completable().Complete(sig)
 			return
@@ -298,5 +299,5 @@ func (s *DaemonService) judgeStopWhenKill() {
 		s.Stop(sig)
 		kklogger.InfoJ("DaemonService:judgeStopWhenKill", "Done")
 		s.shutdownFuture.Completable().Complete(sig)
-	}()
+	}(s)
 }
