@@ -25,16 +25,19 @@ type DaemonService struct {
 	sig                   chan os.Signal
 	stopFuture            concurrent.Future
 	shutdownFuture        concurrent.Future
+	loopInvokerReload     chan int
+	state                 int32
 	shutdownState         int32
 	invokeLoopDaemonTimer *time.Timer
 }
 
 func NewDaemonService() *DaemonService {
 	ds := &DaemonService{
-		StopWhenKill:   true,
-		sig:            make(chan os.Signal),
-		stopFuture:     concurrent.NewFuture(nil),
-		shutdownFuture: concurrent.NewFuture(nil),
+		StopWhenKill:      true,
+		sig:               make(chan os.Signal),
+		stopFuture:        concurrent.NewFuture(nil),
+		shutdownFuture:    concurrent.NewFuture(nil),
+		loopInvokerReload: make(chan int),
 	}
 
 	signal.Notify(ds.sig, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGTERM, syscall.SIGHUP)
@@ -85,7 +88,7 @@ func (s *DaemonService) UnregisterDaemon(name string) error {
 	if v, f := s.DaemonMap.Load(name); f {
 		var c kkpanic.Caught
 		kkpanic.Try(func() {
-			s.stopDaemon(v.(*DaemonEntity), unregisterSignal)
+			c = s.StopDaemon(v.(*DaemonEntity), unregisterSignal)
 		}).CatchAll(func(caught kkpanic.Caught) {
 			c = caught
 		})
@@ -95,75 +98,6 @@ func (s *DaemonService) UnregisterDaemon(name string) error {
 	}
 
 	return nil
-}
-
-func (s *DaemonService) startDaemon(entity *DaemonEntity) {
-	if !atomic.CompareAndSwapInt32(entity.Daemon._State(), StateWait, StateStart) {
-		kklogger.ErrorJ("DaemonService.startDaemon", fmt.Sprintf("%s not in WAIT state", entity.Daemon.Name()))
-		return
-	}
-
-	atomic.StoreInt32(entity.Daemon._State(), StateRun)
-	entity.Daemon.Start()
-	atomic.StoreInt32(entity.Daemon._State(), StateStart)
-	s.entitySetNext(entity)
-	kklogger.InfoJ("DaemonService.startDaemon", fmt.Sprintf("entity %s started", entity.Name))
-}
-
-func (s *DaemonService) invokeLoopDaemon() {
-	s.invokeLoopDaemonTimer = time.NewTimer(time.Second)
-	s.invokeLoopDaemonTimer.Stop()
-	go func() {
-		el := s.getOrderedDaemonEntitySlice()
-		if len(el) == 0 {
-			return
-		}
-
-		for {
-			now := time.Now()
-			next := _MaxTime
-			for _, entity := range s.getOrderedDaemonEntitySlice() {
-				now = time.Now()
-				if !entity.Next.After(now) {
-					if atomic.CompareAndSwapInt32(entity.Daemon._State(), StateStart, StateRun) {
-						go func(entity *DaemonEntity) {
-							if looper, ok := entity.Daemon.(Looper); ok {
-								kkpanic.LogCatch(func() {
-									kklogger.TraceJ("DaemonService.invokeLoopDaemon#Run", entity.Name)
-									if err := looper.Loop(); err != nil {
-										kklogger.ErrorJ(fmt.Sprintf("DaemonService.invokeLoopDaemon#Err!%s", entity.Name), err.Error())
-									} else {
-										kklogger.TraceJ("DaemonService.invokeLoopDaemon#Done", entity.Name)
-									}
-								})
-							}
-						}(entity)
-
-						s.entitySetNext(entity)
-						if next.After(entity.Next) {
-							next = entity.Next
-						}
-
-						atomic.StoreInt32(entity.Daemon._State(), StateStart)
-					}
-				} else {
-					if next.After(entity.Next) {
-						next = entity.Next
-					}
-
-					break
-				}
-			}
-
-			s.invokeLoopDaemonTimer.Reset(next.Sub(now))
-			select {
-			case <-s.invokeLoopDaemonTimer.C:
-				continue
-			case <-s.stopFuture.Done():
-				return
-			}
-		}
-	}()
 }
 
 func (s *DaemonService) entitySetNext(entity *DaemonEntity) {
@@ -194,19 +128,11 @@ func (s *DaemonService) getOrderedDaemonEntitySlice() []*DaemonEntity {
 	return el
 }
 
-func (s *DaemonService) stopDaemon(entity *DaemonEntity, sig os.Signal) {
-	defer func() { atomic.StoreInt32(entity.Daemon._State(), StateWait) }()
-	if !atomic.CompareAndSwapInt32(entity.Daemon._State(), StateStart, StateStop) &&
-		!atomic.CompareAndSwapInt32(entity.Daemon._State(), StateRun, StateStop) {
-		kklogger.ErrorJ("DaemonService.stopDaemon", fmt.Sprintf("%s not in START/RUN state", entity.Daemon.Name()))
-		return
+func (s *DaemonService) Start() error {
+	if !atomic.CompareAndSwapInt32(&s.state, StateWait, StateStart) {
+		return kkpanic.Convert("DaemonService not in WAIT state")
 	}
 
-	entity.Daemon.Stop(sig)
-	kklogger.InfoJ("DaemonService.stopDaemon", fmt.Sprintf("entity %s stopped", entity.Name))
-}
-
-func (s *DaemonService) Start() {
 	var el []*DaemonEntity
 	s.DaemonMap.Range(func(key, value interface{}) bool {
 		el = append(el, value.(*DaemonEntity))
@@ -218,25 +144,104 @@ func (s *DaemonService) Start() {
 	})
 
 	for _, entity := range el {
-		var c kkpanic.Caught
-		kkpanic.Try(func() {
-			s.startDaemon(entity)
-		}).CatchAll(func(caught kkpanic.Caught) {
-			c = caught
-			kklogger.ErrorJ("DaemonService.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
-		})
-
-		if c != nil {
-			s.ShutdownGracefully()
-			return
+		if c := s.StartDaemon(entity); c != nil {
+			return c
 		}
 	}
 
-	s.invokeLoopDaemon()
+	s._LoopInvoker()
+	return nil
 }
 
-func (s *DaemonService) Stop(sig os.Signal) {
-	defer func() { s.stopFuture = concurrent.NewFuture(nil) }()
+func (s *DaemonService) StartDaemon(entity *DaemonEntity) kkpanic.Caught {
+	if !atomic.CompareAndSwapInt32(entity.Daemon._State(), StateWait, StateStart) {
+		return kkpanic.Convert(fmt.Sprintf("%s not in WAIT state", entity.Daemon.Name()))
+	}
+
+	var c kkpanic.Caught
+	kkpanic.Try(func() {
+		atomic.StoreInt32(entity.Daemon._State(), StateRun)
+		entity.Daemon.Start()
+		s.entitySetNext(entity)
+		if s.invokeLoopDaemonTimer != nil {
+			s.loopInvokerReload <- 1
+		}
+
+		kklogger.InfoJ("DaemonService.StartDaemon", fmt.Sprintf("entity %s started", entity.Name))
+	}).CatchAll(func(caught kkpanic.Caught) {
+		c = caught
+		kklogger.ErrorJ("DaemonService.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
+	}).Finally(func() {
+		atomic.StoreInt32(entity.Daemon._State(), StateStart)
+	})
+
+	return c
+}
+
+func (s *DaemonService) _LoopInvoker() {
+	s.invokeLoopDaemonTimer = time.NewTimer(time.Second)
+	s.invokeLoopDaemonTimer.Stop()
+	go func(s *DaemonService) {
+		for {
+			now := time.Now()
+			next := _MaxTime
+			for _, entity := range s.getOrderedDaemonEntitySlice() {
+				now = time.Now()
+				if !entity.Next.After(now) {
+					if atomic.CompareAndSwapInt32(entity.Daemon._State(), StateStart, StateRun) {
+						go func(entity *DaemonEntity) {
+							if looper, ok := entity.Daemon.(Looper); ok {
+								kkpanic.LogCatch(func() {
+									kklogger.TraceJ("DaemonService._LoopInvoker#Run", entity.Name)
+									if err := looper.Loop(); err != nil {
+										kklogger.ErrorJ(fmt.Sprintf("DaemonService._LoopInvoker#Err!%s", entity.Name), err.Error())
+									} else {
+										kklogger.TraceJ("DaemonService._LoopInvoker#Done", entity.Name)
+									}
+								})
+							}
+						}(entity)
+
+						s.entitySetNext(entity)
+						if next.After(entity.Next) {
+							next = entity.Next
+						}
+
+						atomic.StoreInt32(entity.Daemon._State(), StateStart)
+					}
+				} else {
+					if next.After(entity.Next) {
+						next = entity.Next
+					}
+
+					break
+				}
+			}
+
+			s.invokeLoopDaemonTimer.Reset(next.Sub(now))
+			select {
+			case <-s.invokeLoopDaemonTimer.C:
+				continue
+			case <-s.loopInvokerReload:
+				s.invokeLoopDaemonTimer.Stop()
+				continue
+			case <-s.stopFuture.Done():
+				return
+			}
+		}
+	}(s)
+}
+
+func (s *DaemonService) Stop(sig os.Signal) error {
+	if !atomic.CompareAndSwapInt32(&s.state, StateStart, StateStop) {
+		return kkpanic.Convert("DaemonService not in START state")
+	}
+
+	defer func(s *DaemonService) {
+		s.stopFuture = concurrent.NewFuture(nil)
+		s.state = StateWait
+	}(s)
+
 	s.stopFuture.Completable().Complete(nil)
 
 	var el []*DaemonEntity
@@ -255,21 +260,31 @@ func (s *DaemonService) Stop(sig os.Signal) {
 	}
 
 	for _, entity := range el {
-		var c kkpanic.Caught
-		kkpanic.Try(func() {
-			s.stopDaemon(entity, sig)
-		}).CatchAll(func(caught kkpanic.Caught) {
-			c = caught
-			kklogger.ErrorJ("DaemonService.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
-		})
-
-		if c != nil {
-			panic(&PanicResult{
-				Daemon: entity.Daemon,
-				Caught: c,
-			})
+		if c := s.StopDaemon(entity, sig); c != nil {
+			kklogger.ErrorJ("DaemonService.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, c.String()))
 		}
 	}
+
+	return nil
+}
+
+func (s *DaemonService) StopDaemon(entity *DaemonEntity, sig os.Signal) kkpanic.Caught {
+	defer func() { atomic.StoreInt32(entity.Daemon._State(), StateWait) }()
+	if !atomic.CompareAndSwapInt32(entity.Daemon._State(), StateStart, StateStop) &&
+		!atomic.CompareAndSwapInt32(entity.Daemon._State(), StateRun, StateStop) {
+		return kkpanic.Convert(fmt.Sprintf("%s not in START/RUN state", entity.Daemon.Name()))
+	}
+
+	var c kkpanic.Caught
+	kkpanic.Try(func() {
+		entity.Daemon.Stop(sig)
+		kklogger.InfoJ("DaemonService.StopDaemon", fmt.Sprintf("entity %s stopped", entity.Name))
+	}).CatchAll(func(caught kkpanic.Caught) {
+		c = caught
+		kklogger.ErrorJ("DaemonService.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
+	})
+
+	return c
 }
 
 func (s *DaemonService) IsShutdown() bool {

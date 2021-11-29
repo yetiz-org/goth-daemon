@@ -1,6 +1,7 @@
 package kkdaemon
 
 import (
+	"fmt"
 	"os"
 	"syscall"
 	"time"
@@ -110,6 +111,22 @@ func RegisterSimpleDaemon(name string, startFunc func(), stopFunc func(sig os.Si
 	})
 }
 
+func StartDaemon(name string) error {
+	if entity, f := DefaultService.DaemonMap.Load(name); !f {
+		return fmt.Errorf(fmt.Sprintf("dameon %s not found", name))
+	} else {
+		return DefaultService.StartDaemon(entity.(*DaemonEntity))
+	}
+}
+
+func StopDaemon(name string, sig os.Signal) error {
+	if entity, f := DefaultService.DaemonMap.Load(name); !f {
+		return fmt.Errorf(fmt.Sprintf("dameon %s not found", name))
+	} else {
+		return DefaultService.StopDaemon(entity.(*DaemonEntity), sig)
+	}
+}
+
 func GetDaemon(name string) *DaemonEntity {
 	return DefaultService.GetDaemon(name)
 }
@@ -118,12 +135,12 @@ func UnregisterDaemon(name string) error {
 	return DefaultService.UnregisterDaemon(name)
 }
 
-func Start() {
-	DefaultService.Start()
+func Start() error {
+	return DefaultService.Start()
 }
 
-func Stop(sig os.Signal) {
-	DefaultService.Stop(sig)
+func Stop(sig os.Signal) error {
+	return DefaultService.Stop(sig)
 }
 
 func IsShutdown() bool {

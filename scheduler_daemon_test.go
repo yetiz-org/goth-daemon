@@ -16,16 +16,19 @@ func TestSchedulerDaemon(t *testing.T) {
 	assert.Nil(t, RegisterDaemon(testSchedulerPerFiveMinuteDaemon))
 	testSchedulerPerFiveSecondDaemon := &testSchedulerPerFiveSecondDaemon{}
 	assert.Nil(t, RegisterDaemon(testSchedulerPerFiveSecondDaemon))
-	Start()
+	assert.Nil(t, Start())
 	assert.Equal(t, GetDaemon(daemon.Name()).Next.Format("2006-01-02 15:04:05"), time.Now().Truncate(time.Minute).Add(time.Minute).Format("2006-01-02 15:04:05"))
 	assert.Equal(t, GetDaemon(testSchedulerPerFiveMinuteDaemon.Name()).Next.Format("2006-01-02 15:04:05"), time.Now().Truncate(time.Minute*5).Add(time.Minute*5).Format("2006-01-02 15:04:05"))
 	assert.Equal(t, GetDaemon(testSchedulerPerFiveSecondDaemon.Name()).Next.Format("2006-01-02 15:04:05"), time.Now().Truncate(time.Second*5).Add(time.Second*5).Format("2006-01-02 15:04:05"))
 	assert.Equal(t, 1, daemon.start)
-	<-time.After(time.Minute)
-	assert.Equal(t, 1, daemon.loop)
+	testSchedulerPerSecondDaemon := &testSchedulerPerSecondDaemon{}
+	assert.Nil(t, RegisterDaemon(testSchedulerPerSecondDaemon))
+	assert.Nil(t, StartDaemon(testSchedulerPerSecondDaemon.Name()))
+	<-time.After(time.Second * 6)
 	assert.Equal(t, 0, testSchedulerPerFiveMinuteDaemon.loop)
-	assert.True(t, testSchedulerPerFiveSecondDaemon.loop > 10)
-	Stop(syscall.SIGKILL)
+	assert.True(t, testSchedulerPerFiveSecondDaemon.loop > 0)
+	assert.True(t, testSchedulerPerSecondDaemon.loop > 5)
+	assert.Nil(t, Stop(syscall.SIGKILL))
 	assert.Equal(t, "testSchedulerDaemon", daemon.Name())
 	assert.Equal(t, "testSchedulerPerFiveMinuteDaemon", testSchedulerPerFiveMinuteDaemon.Name())
 	assert.Equal(t, "testSchedulerPerFiveSecondDaemon", testSchedulerPerFiveSecondDaemon.Name())
@@ -101,5 +104,29 @@ func (d *testSchedulerPerFiveSecondDaemon) Loop() error {
 }
 
 func (d *testSchedulerPerFiveSecondDaemon) Stop(sig os.Signal) {
+	d.stop = 1
+}
+
+type testSchedulerPerSecondDaemon struct {
+	DefaultSchedulerDaemon
+	start int
+	loop  int
+	stop  int
+}
+
+func (d *testSchedulerPerSecondDaemon) When() CronSyntax {
+	return "* * * * * *"
+}
+
+func (d *testSchedulerPerSecondDaemon) Start() {
+	d.start = 1
+}
+
+func (d *testSchedulerPerSecondDaemon) Loop() error {
+	d.loop++
+	return nil
+}
+
+func (d *testSchedulerPerSecondDaemon) Stop(sig os.Signal) {
 	d.stop = 1
 }
