@@ -200,14 +200,14 @@ func (s *DaemonService) _LoopInvoker() {
 									}
 								})
 							}
+
+							atomic.StoreInt32(entity.Daemon._State(), StateStart)
 						}(entity)
 
 						s.entitySetNext(entity)
 						if next.After(entity.Next) {
 							next = entity.Next
 						}
-
-						atomic.StoreInt32(entity.Daemon._State(), StateStart)
 					}
 				} else {
 					if next.After(entity.Next) {

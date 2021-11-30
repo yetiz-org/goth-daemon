@@ -21,7 +21,7 @@ func TestSchedulerDaemon(t *testing.T) {
 	assert.Equal(t, GetDaemon(testSchedulerPerFiveMinuteDaemon.Name()).Next.Format("2006-01-02 15:04:05"), time.Now().Truncate(time.Minute*5).Add(time.Minute*5).Format("2006-01-02 15:04:05"))
 	assert.Equal(t, GetDaemon(testSchedulerPerFiveSecondDaemon.Name()).Next.Format("2006-01-02 15:04:05"), time.Now().Truncate(time.Second*5).Add(time.Second*5).Format("2006-01-02 15:04:05"))
 	assert.Equal(t, 1, daemon.start)
-	testSchedulerPerSecondDaemon := &testSchedulerPerSecondDaemon{}
+	testSchedulerPerSecondDaemon := &testSchedulerPerSecondDaemon{t: t}
 	assert.Nil(t, RegisterDaemon(testSchedulerPerSecondDaemon))
 	assert.Nil(t, StartDaemon(testSchedulerPerSecondDaemon.Name()))
 	<-time.After(time.Second * 6)
@@ -112,6 +112,7 @@ type testSchedulerPerSecondDaemon struct {
 	start int
 	loop  int
 	stop  int
+	t     *testing.T
 }
 
 func (d *testSchedulerPerSecondDaemon) When() CronSyntax {
@@ -119,14 +120,17 @@ func (d *testSchedulerPerSecondDaemon) When() CronSyntax {
 }
 
 func (d *testSchedulerPerSecondDaemon) Start() {
+	assert.Equal(d.t, StateRun, d.State())
 	d.start = 1
 }
 
 func (d *testSchedulerPerSecondDaemon) Loop() error {
+	assert.Equal(d.t, StateRun, d.State())
 	d.loop++
 	return nil
 }
 
 func (d *testSchedulerPerSecondDaemon) Stop(sig os.Signal) {
+	assert.Equal(d.t, StateStop, d.State())
 	d.stop = 1
 }
