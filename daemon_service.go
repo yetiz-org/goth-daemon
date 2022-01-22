@@ -35,8 +35,8 @@ func NewDaemonService() *DaemonService {
 	ds := &DaemonService{
 		StopWhenKill:      true,
 		sig:               make(chan os.Signal),
-		stopFuture:        concurrent.NewFuture(nil),
-		shutdownFuture:    concurrent.NewFuture(nil),
+		stopFuture:        concurrent.NewFuture(),
+		shutdownFuture:    concurrent.NewFuture(),
 		loopInvokerReload: make(chan int),
 	}
 
@@ -238,7 +238,7 @@ func (s *DaemonService) Stop(sig os.Signal) error {
 	}
 
 	defer func(s *DaemonService) {
-		s.stopFuture = concurrent.NewFuture(nil)
+		s.stopFuture = concurrent.NewFuture()
 		s.state = StateWait
 	}(s)
 
