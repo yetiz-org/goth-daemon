@@ -6,7 +6,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kklab-com/goth-kkutil/concurrent"
+	concurrent "github.com/kklab-com/goth-concurrent"
 	kkpanic "github.com/kklab-com/goth-panic"
 )
 

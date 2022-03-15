@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	concurrent "github.com/kklab-com/goth-concurrent"
 	kklogger "github.com/kklab-com/goth-kklogger"
-	"github.com/kklab-com/goth-kkutil/concurrent"
 	kkpanic "github.com/kklab-com/goth-panic"
 )
 
@@ -216,6 +216,10 @@ func (s *DaemonService) _LoopInvoker() {
 
 					break
 				}
+			}
+
+			if s.invokeLoopDaemonTimer == nil {
+				return
 			}
 
 			s.invokeLoopDaemonTimer.Reset(next.Sub(now))
