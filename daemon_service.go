@@ -191,13 +191,15 @@ func (s *DaemonService) _LoopInvoker() {
 					if atomic.CompareAndSwapInt32(entity.Daemon._State(), StateStart, StateRun) {
 						go func(entity *DaemonEntity) {
 							if looper, ok := entity.Daemon.(Looper); ok {
-								kkpanic.LogCatch(func() {
+								kkpanic.Catch(func() {
 									kklogger.TraceJ("DaemonService._LoopInvoker#Run", entity.Name)
 									if err := looper.Loop(); err != nil {
 										kklogger.ErrorJ(fmt.Sprintf("DaemonService._LoopInvoker#Err!%s", entity.Name), err.Error())
 									} else {
 										kklogger.TraceJ("DaemonService._LoopInvoker#Done", entity.Name)
 									}
+								}, func(r kkpanic.Caught) {
+									kklogger.ErrorJ("panic.Log", r)
 								})
 							}
 
