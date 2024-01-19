@@ -187,7 +187,7 @@ func (s *DaemonService) _LoopInvoker() {
 			next := _MaxTime
 			for _, entity := range s.getOrderedDaemonEntitySlice() {
 				now = time.Now()
-				if !entity.Next.After(now) {
+				if entity.Next.Before(now) {
 					if atomic.CompareAndSwapInt32(entity.Daemon._State(), StateStart, StateRun) {
 						go func(entity *DaemonEntity) {
 							if looper, ok := entity.Daemon.(Looper); ok {
@@ -205,11 +205,11 @@ func (s *DaemonService) _LoopInvoker() {
 
 							atomic.StoreInt32(entity.Daemon._State(), StateStart)
 						}(entity)
+					}
 
-						s.entitySetNext(entity)
-						if next.After(entity.Next) {
-							next = entity.Next
-						}
+					s.entitySetNext(entity)
+					if next.After(entity.Next) {
+						next = entity.Next
 					}
 				} else {
 					if next.After(entity.Next) {
@@ -225,7 +225,7 @@ func (s *DaemonService) _LoopInvoker() {
 			}
 
 			wait := next.Sub(now)
-			if wait < 0 {
+			if next.Before(now) {
 				wait = time.Microsecond
 			}
 
