@@ -224,7 +224,12 @@ func (s *DaemonService) _LoopInvoker() {
 				return
 			}
 
-			s.invokeLoopDaemonTimer.Reset(next.Sub(now))
+			wait := next.Sub(now)
+			if wait < 0 {
+				wait = time.Microsecond
+			}
+
+			s.invokeLoopDaemonTimer.Reset(wait)
 			select {
 			case <-s.invokeLoopDaemonTimer.C:
 				continue
