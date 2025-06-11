@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	concurrent "github.com/kklab-com/goth-concurrent"
-	kklogger "github.com/kklab-com/goth-kklogger"
-	kkpanic "github.com/kklab-com/goth-panic"
+	concurrent "github.com/yetiz-org/goth-concurrent"
+	kklogger "github.com/yetiz-org/goth-kklogger"
+	kkpanic "github.com/yetiz-org/goth-panic"
 )
 
 type DaemonService struct {

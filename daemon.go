@@ -6,8 +6,8 @@ import (
 	"syscall"
 	"time"
 
-	concurrent "github.com/kklab-com/goth-concurrent"
-	kkpanic "github.com/kklab-com/goth-panic"
+	concurrent "github.com/yetiz-org/goth-concurrent"
+	kkpanic "github.com/yetiz-org/goth-panic"
 )
 
 var DefaultService = NewDaemonService()
