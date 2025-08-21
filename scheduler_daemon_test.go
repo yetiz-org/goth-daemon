@@ -187,8 +187,9 @@ func TestSchedulerDaemonWithErrors(t *testing.T) {
 
 	assert.Nil(t, Start())
 
-	// 等待一些循環執行（包含錯誤的）
-	time.Sleep(2 * time.Second)
+	// Wait longer to ensure multiple cycles execute and error conditions trigger
+	// Since the cron runs every second and errors on even loops, wait 5 seconds
+	time.Sleep(5 * time.Second)
 
 	// 即使 Loop() 返回錯誤，daemon 仍應繼續運行
 	assert.True(t, daemon.loop > 0)

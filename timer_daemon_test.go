@@ -108,8 +108,9 @@ func TestTimerDaemonWithErrors(t *testing.T) {
 
 	assert.Nil(t, Start())
 
-	// 等待一些循環執行（包含錯誤的）
-	time.Sleep(1 * time.Second)
+	// Wait longer to ensure multiple cycles execute and error conditions trigger
+	// Timer runs every 50ms and errors every 3rd loop, wait 2 seconds to be safe
+	time.Sleep(2 * time.Second)
 
 	// 即使 Loop() 返回錯誤，daemon 仍應繼續運行
 	assert.True(t, daemon.loop > 0)
