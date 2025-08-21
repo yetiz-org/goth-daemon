@@ -29,6 +29,16 @@ type DaemonService struct {
 	state                 int32
 	shutdownState         int32
 	invokeLoopDaemonTimer *time.Timer
+
+	// Slice cache optimization fields
+	daemonEntityCache []*DaemonEntity // Cache sorted daemon entity slice (includes only TimerDaemon and SchedulerDaemon)
+	daemonCacheMutex  sync.RWMutex    // RW lock for cache protection
+	daemonCacheValid  bool            // Whether cache is valid
+
+	// Cache for all daemons (used by Start/Stop methods)
+	allDaemonCache      []*DaemonEntity // Cache all daemon entities
+	allDaemonCacheMutex sync.RWMutex    // RW lock for all daemon cache protection
+	allDaemonCacheValid bool            // Whether all daemon cache is valid
 }
 
 func NewDaemonService() *DaemonService {
@@ -43,6 +53,21 @@ func NewDaemonService() *DaemonService {
 	signal.Notify(ds.sig, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGTERM, syscall.SIGHUP)
 	go ds.judgeStopWhenKill()
 	return ds
+}
+
+// invalidateDaemonCache invalidates daemon cache
+func (s *DaemonService) invalidateDaemonCache() {
+	// Invalidate timer and scheduler daemon cache
+	s.daemonCacheMutex.Lock()
+	s.daemonCacheValid = false
+	s.daemonEntityCache = nil
+	s.daemonCacheMutex.Unlock()
+
+	// Invalidate all daemon cache
+	s.allDaemonCacheMutex.Lock()
+	s.allDaemonCacheValid = false
+	s.allDaemonCache = nil
+	s.allDaemonCacheMutex.Unlock()
 }
 
 func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
@@ -70,6 +95,8 @@ func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
 	} else {
 		s.orderIndex++
 		v.(*DaemonEntity).Order = s.orderIndex
+		// Daemon registered successfully, invalidate cache
+		s.invalidateDaemonCache()
 	}
 
 	atomic.StoreInt32(daemon._State(), StateWait)
@@ -84,6 +111,47 @@ func (s *DaemonService) GetDaemon(name string) *DaemonEntity {
 	return nil
 }
 
+// getAllDaemonEntitySlice gets cached slice of all daemons (used by Start/Stop methods)
+func (s *DaemonService) getAllDaemonEntitySlice() []*DaemonEntity {
+	// First try to use cache
+	s.allDaemonCacheMutex.RLock()
+	if s.allDaemonCacheValid && s.allDaemonCache != nil {
+		// Create cache copy to avoid concurrent modifications
+		result := make([]*DaemonEntity, len(s.allDaemonCache))
+		copy(result, s.allDaemonCache)
+		s.allDaemonCacheMutex.RUnlock()
+		return result
+	}
+	s.allDaemonCacheMutex.RUnlock()
+
+	// Cache invalid, need to rebuild
+	s.allDaemonCacheMutex.Lock()
+	defer s.allDaemonCacheMutex.Unlock()
+
+	// Double check to avoid multiple goroutines rebuilding cache simultaneously
+	if s.allDaemonCacheValid && s.allDaemonCache != nil {
+		result := make([]*DaemonEntity, len(s.allDaemonCache))
+		copy(result, s.allDaemonCache)
+		return result
+	}
+
+	// Rebuild cache
+	var el []*DaemonEntity
+	s.DaemonMap.Range(func(key, value interface{}) bool {
+		el = append(el, value.(*DaemonEntity))
+		return true
+	})
+
+	// Update cache
+	s.allDaemonCache = el
+	s.allDaemonCacheValid = true
+
+	// Return cache copy
+	result := make([]*DaemonEntity, len(el))
+	copy(result, el)
+	return result
+}
+
 func (s *DaemonService) UnregisterDaemon(name string) error {
 	if v, f := s.DaemonMap.Load(name); f {
 		var c kkpanic.Caught
@@ -94,6 +162,8 @@ func (s *DaemonService) UnregisterDaemon(name string) error {
 		})
 
 		s.DaemonMap.Delete(name)
+		// Daemon unregistered successfully, invalidate cache
+		s.invalidateDaemonCache()
 		return c
 	}
 
@@ -111,13 +181,35 @@ func (s *DaemonService) entitySetNext(entity *DaemonEntity) {
 }
 
 func (s *DaemonService) getOrderedDaemonEntitySlice() []*DaemonEntity {
+	// First try to use cache
+	s.daemonCacheMutex.RLock()
+	if s.daemonCacheValid && s.daemonEntityCache != nil {
+		// Create cache copy to avoid concurrent modifications
+		result := make([]*DaemonEntity, len(s.daemonEntityCache))
+		copy(result, s.daemonEntityCache)
+		s.daemonCacheMutex.RUnlock()
+		return result
+	}
+	s.daemonCacheMutex.RUnlock()
+
+	// Cache invalid, need to rebuild
+	s.daemonCacheMutex.Lock()
+	defer s.daemonCacheMutex.Unlock()
+
+	// Double check to avoid multiple goroutines rebuilding cache simultaneously
+	if s.daemonCacheValid && s.daemonEntityCache != nil {
+		result := make([]*DaemonEntity, len(s.daemonEntityCache))
+		copy(result, s.daemonEntityCache)
+		return result
+	}
+
+	// Rebuild cache
 	var el []*DaemonEntity
 	s.DaemonMap.Range(func(key, value interface{}) bool {
 		switch value.(*DaemonEntity).Daemon.(type) {
 		case TimerDaemon, SchedulerDaemon:
 			el = append(el, value.(*DaemonEntity))
 		}
-
 		return true
 	})
 
@@ -125,7 +217,14 @@ func (s *DaemonService) getOrderedDaemonEntitySlice() []*DaemonEntity {
 		return el[i].Next.Before(el[j].Next)
 	})
 
-	return el
+	// Update cache
+	s.daemonEntityCache = el
+	s.daemonCacheValid = true
+
+	// Return cache copy
+	result := make([]*DaemonEntity, len(el))
+	copy(result, el)
+	return result
 }
 
 func (s *DaemonService) Start() error {
@@ -133,11 +232,8 @@ func (s *DaemonService) Start() error {
 		return kkpanic.Convert("DaemonService not in WAIT state")
 	}
 
-	var el []*DaemonEntity
-	s.DaemonMap.Range(func(key, value interface{}) bool {
-		el = append(el, value.(*DaemonEntity))
-		return true
-	})
+	// Use cache to get all daemons
+	el := s.getAllDaemonEntitySlice()
 
 	sort.Slice(el, func(i, j int) bool {
 		return el[i].Order < el[j].Order
@@ -220,7 +316,8 @@ func (s *DaemonService) _LoopInvoker() {
 				}
 			}
 
-			if s.invokeLoopDaemonTimer == nil {
+			timer := s.invokeLoopDaemonTimer
+			if timer == nil {
 				return
 			}
 
@@ -229,12 +326,14 @@ func (s *DaemonService) _LoopInvoker() {
 				wait = time.Microsecond
 			}
 
-			s.invokeLoopDaemonTimer.Reset(wait)
+			timer.Reset(wait)
 			select {
-			case <-s.invokeLoopDaemonTimer.C:
+			case <-timer.C:
 				continue
 			case <-s.loopInvokerReload:
-				s.invokeLoopDaemonTimer.Stop()
+				if currentTimer := s.invokeLoopDaemonTimer; currentTimer != nil {
+					currentTimer.Stop()
+				}
 				continue
 			case <-s.stopFuture.Done():
 				return
@@ -255,11 +354,8 @@ func (s *DaemonService) Stop(sig os.Signal) error {
 
 	s.stopFuture.Completable().Complete(nil)
 
-	var el []*DaemonEntity
-	s.DaemonMap.Range(func(key, value interface{}) bool {
-		el = append(el, value.(*DaemonEntity))
-		return true
-	})
+	// Use cache to get all daemons
+	el := s.getAllDaemonEntitySlice()
 
 	sort.Slice(el, func(i, j int) bool {
 		return el[i].Order > el[j].Order
