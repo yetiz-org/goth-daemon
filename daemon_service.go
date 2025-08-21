@@ -281,11 +281,21 @@ func (s *DaemonService) _LoopInvoker() {
 		for {
 			now := time.Now()
 			next := _MaxTime
+			needsCacheInvalidation := false
+			
 			for _, entity := range s.getOrderedDaemonEntitySlice() {
 				now = time.Now()
-				if entity.Next.Before(now) {
+				if entity.Next.Before(now) || entity.Next.Equal(now) {
 					if atomic.CompareAndSwapInt32(entity.Daemon._State(), StateStart, StateRun) {
+						// Set next execution time immediately before starting goroutine
+						s.entitySetNext(entity)
+						needsCacheInvalidation = true
+						
 						go func(entity *DaemonEntity) {
+							defer func() {
+								atomic.StoreInt32(entity.Daemon._State(), StateStart)
+							}()
+							
 							if looper, ok := entity.Daemon.(Looper); ok {
 								kkpanic.Catch(func() {
 									kklogger.TraceJ("DaemonService._LoopInvoker#Run", entity.Name)
@@ -298,12 +308,9 @@ func (s *DaemonService) _LoopInvoker() {
 									kklogger.ErrorJ("panic.Log", r)
 								})
 							}
-
-							atomic.StoreInt32(entity.Daemon._State(), StateStart)
 						}(entity)
 					}
 
-					s.entitySetNext(entity)
 					if next.After(entity.Next) {
 						next = entity.Next
 					}
@@ -311,9 +318,13 @@ func (s *DaemonService) _LoopInvoker() {
 					if next.After(entity.Next) {
 						next = entity.Next
 					}
-
 					break
 				}
+			}
+
+			// Invalidate cache if any daemon was executed and next time was updated
+			if needsCacheInvalidation {
+				s.invalidateDaemonCache()
 			}
 
 			timer := s.invokeLoopDaemonTimer
