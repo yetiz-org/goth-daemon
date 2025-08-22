@@ -207,7 +207,7 @@ func TestDaemonServiceLoopInvoker(t *testing.T) {
 	time.Sleep(250 * time.Millisecond)
 	
 	// 檢查 Loop 方法是否被調用
-	assert.True(t, timerDaemon.loopCount > 0)
+	assert.True(t, atomic.LoadInt32(&timerDaemon.loopCount) > 0)
 	
 	err = service.Stop(syscall.SIGTERM)
 	require.NoError(t, err)

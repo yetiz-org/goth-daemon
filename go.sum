@@ -12,8 +12,8 @@ github.com/stretchr/testify v1.2.2/go.mod h1:a8OnRcib4nhh0OaRAV+Yts87kKdq0PP7pXf
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.10.0 h1:Xv5erBjTwe/5IxqUQTdXv5kgmIvbHo3QQyRwhJsOfJA=
 github.com/stretchr/testify v1.10.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
-github.com/yetiz-org/goth-concurrent v1.2.1 h1:wVLSTUYHD4H1gZND49rLis6fnKugI18MZG7q2VGJ0i8=
-github.com/yetiz-org/goth-concurrent v1.2.1/go.mod h1:JzlvrOl1DfASyf/OA5CIj7LZmgfTTUlSfkVjLr7YwIc=
+github.com/yetiz-org/goth-concurrent v1.2.2 h1:25T4uhirQNIImbP4wv1D9q6NFkT+cw+ownvY8XdWvTo=
+github.com/yetiz-org/goth-concurrent v1.2.2/go.mod h1:JzlvrOl1DfASyf/OA5CIj7LZmgfTTUlSfkVjLr7YwIc=
 github.com/yetiz-org/goth-kklogger v1.1.1 h1:QCKH/Bt0iyiRwTITL7Bz6SGBFAyFA3wvXw2UaqUGCY0=
 github.com/yetiz-org/goth-kklogger v1.1.1/go.mod h1:0+Vm4Pvd71vE3KgldC9BaFTrf3btlMYUCyliSgDZMhY=
 github.com/yetiz-org/goth-panic v1.1.1 h1:Tdp/1WowlKpILXxozECsKZDF0KypiZ4TMhy3/AJHlEA=

@@ -3,6 +3,7 @@ package kkdaemon
 import (
 	"fmt"
 	"os"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -21,28 +22,29 @@ func TestSchedulerDaemon(t *testing.T) {
 	assert.Equal(t, GetDaemon(daemon.Name()).Next.Format("2006-01-02 15:04:05"), time.Now().Truncate(time.Minute).Add(time.Minute).Format("2006-01-02 15:04:05"))
 	assert.Equal(t, GetDaemon(testSchedulerPerFiveMinuteDaemon.Name()).Next.Format("2006-01-02 15:04:05"), time.Now().Truncate(time.Minute*5).Add(time.Minute*5).Format("2006-01-02 15:04:05"))
 	assert.Equal(t, GetDaemon(testSchedulerPerFiveSecondDaemon.Name()).Next.Format("2006-01-02 15:04:05"), time.Now().Truncate(time.Second*5).Add(time.Second*5).Format("2006-01-02 15:04:05"))
-	assert.Equal(t, 1, daemon.start)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&daemon.start))
 	testSchedulerPerSecondDaemon := &testSchedulerPerSecondDaemon{t: t}
 	assert.Nil(t, RegisterDaemon(testSchedulerPerSecondDaemon))
 	assert.Nil(t, StartDaemon(testSchedulerPerSecondDaemon.Name()))
 	<-time.After(time.Second * 6)
-	assert.Equal(t, 0, testSchedulerPerFiveMinuteDaemon.loop)
-	assert.True(t, testSchedulerPerFiveSecondDaemon.loop > 0)
+	assert.Equal(t, int32(0), atomic.LoadInt32(&testSchedulerPerFiveMinuteDaemon.loop))
+	assert.True(t, atomic.LoadInt32(&testSchedulerPerFiveSecondDaemon.loop) > 0)
 	// 調整測試期望值：考慮到緩存優化可能會略微影響調度精度
 	// 在6秒內至少應該執行3-4次（允許一些延遲和緩存影響）
-	assert.True(t, testSchedulerPerSecondDaemon.loop >= 3, "Expected at least 3 executions in 6 seconds, got %d", testSchedulerPerSecondDaemon.loop)
+	loopCount := atomic.LoadInt32(&testSchedulerPerSecondDaemon.loop)
+	assert.True(t, loopCount >= 3, "Expected at least 3 executions in 6 seconds, got %d", loopCount)
 	assert.Nil(t, Stop(syscall.SIGKILL))
 	assert.Equal(t, "testSchedulerDaemon", daemon.Name())
 	assert.Equal(t, "testSchedulerPerFiveMinuteDaemon", testSchedulerPerFiveMinuteDaemon.Name())
 	assert.Equal(t, "testSchedulerPerFiveSecondDaemon", testSchedulerPerFiveSecondDaemon.Name())
-	assert.Equal(t, 1, daemon.stop)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&daemon.stop))
 }
 
 type testSchedulerDaemon struct {
 	DefaultSchedulerDaemon
-	start int
-	loop  int
-	stop  int
+	start int32
+	loop  int32
+	stop  int32
 }
 
 func (d *testSchedulerDaemon) When() CronSyntax {
@@ -50,23 +52,23 @@ func (d *testSchedulerDaemon) When() CronSyntax {
 }
 
 func (d *testSchedulerDaemon) Start() {
-	d.start = 1
+	atomic.StoreInt32(&d.start, 1)
 }
 
 func (d *testSchedulerDaemon) Loop() error {
-	d.loop++
+	atomic.AddInt32(&d.loop, 1)
 	return nil
 }
 
 func (d *testSchedulerDaemon) Stop(sig os.Signal) {
-	d.stop = 1
+	atomic.StoreInt32(&d.stop, 1)
 }
 
 type testSchedulerPerFiveMinuteDaemon struct {
 	DefaultSchedulerDaemon
-	start int
-	loop  int
-	stop  int
+	start int32
+	loop  int32
+	stop  int32
 }
 
 func (d *testSchedulerPerFiveMinuteDaemon) When() CronSyntax {
@@ -74,23 +76,23 @@ func (d *testSchedulerPerFiveMinuteDaemon) When() CronSyntax {
 }
 
 func (d *testSchedulerPerFiveMinuteDaemon) Start() {
-	d.start = 1
+	atomic.StoreInt32(&d.start, 1)
 }
 
 func (d *testSchedulerPerFiveMinuteDaemon) Loop() error {
-	d.loop++
+	atomic.AddInt32(&d.loop, 1)
 	return nil
 }
 
 func (d *testSchedulerPerFiveMinuteDaemon) Stop(sig os.Signal) {
-	d.stop = 1
+	atomic.StoreInt32(&d.stop, 1)
 }
 
 type testSchedulerPerFiveSecondDaemon struct {
 	DefaultSchedulerDaemon
-	start int
-	loop  int
-	stop  int
+	start int32
+	loop  int32
+	stop  int32
 }
 
 func (d *testSchedulerPerFiveSecondDaemon) When() CronSyntax {
@@ -98,23 +100,23 @@ func (d *testSchedulerPerFiveSecondDaemon) When() CronSyntax {
 }
 
 func (d *testSchedulerPerFiveSecondDaemon) Start() {
-	d.start = 1
+	atomic.StoreInt32(&d.start, 1)
 }
 
 func (d *testSchedulerPerFiveSecondDaemon) Loop() error {
-	d.loop++
+	atomic.AddInt32(&d.loop, 1)
 	return nil
 }
 
 func (d *testSchedulerPerFiveSecondDaemon) Stop(sig os.Signal) {
-	d.stop = 1
+	atomic.StoreInt32(&d.stop, 1)
 }
 
 type testSchedulerPerSecondDaemon struct {
 	DefaultSchedulerDaemon
-	start int
-	loop  int
-	stop  int
+	start int32
+	loop  int32
+	stop  int32
 	t     *testing.T
 }
 
@@ -124,18 +126,18 @@ func (d *testSchedulerPerSecondDaemon) When() CronSyntax {
 
 func (d *testSchedulerPerSecondDaemon) Start() {
 	assert.Equal(d.t, StateRun, d.State())
-	d.start = 1
+	atomic.StoreInt32(&d.start, 1)
 }
 
 func (d *testSchedulerPerSecondDaemon) Loop() error {
 	assert.Equal(d.t, StateRun, d.State())
-	d.loop++
+	atomic.AddInt32(&d.loop, 1)
 	return nil
 }
 
 func (d *testSchedulerPerSecondDaemon) Stop(sig os.Signal) {
 	assert.Equal(d.t, StateStop, d.State())
-	d.stop = 1
+	atomic.StoreInt32(&d.stop, 1)
 }
 
 // TestCronSyntaxEdgeCases 測試 CronSyntax 的邊界條件和錯誤處理
@@ -192,8 +194,8 @@ func TestSchedulerDaemonWithErrors(t *testing.T) {
 	time.Sleep(5 * time.Second)
 
 	// 即使 Loop() 返回錯誤，daemon 仍應繼續運行
-	assert.True(t, daemon.loop > 0)
-	assert.True(t, daemon.errorCount > 0)
+	assert.True(t, atomic.LoadInt32(&daemon.loop) > 0)
+	assert.True(t, atomic.LoadInt32(&daemon.errorCount) > 0)
 
 	assert.Nil(t, Stop(syscall.SIGKILL))
 }
@@ -247,25 +249,25 @@ func TestSchedulerDaemonStateTransitions(t *testing.T) {
 	// 啟動服務以啟動循環調用器
 	assert.Nil(t, Start())
 	assert.Equal(t, StateStart, daemon.State())
-	assert.True(t, daemon.startCalled)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&daemon.startCalled))
 
 	// 等待至少一次 Loop 執行
 	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && !daemon.loopCalled {
+	for time.Now().Before(deadline) && atomic.LoadInt32(&daemon.loopCalled) == 0 {
 		time.Sleep(100 * time.Millisecond)
 	}
-	assert.True(t, daemon.loopCalled, "Loop should have been called within 5 seconds")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&daemon.loopCalled), "Loop should have been called within 5 seconds")
 
 	assert.Nil(t, Stop(syscall.SIGTERM))
 	assert.Equal(t, StateWait, daemon.State())
-	assert.True(t, daemon.stopCalled)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&daemon.stopCalled))
 }
 
 // testErrorSchedulerDaemon 用於測試錯誤處理的排程器 daemon
 type testErrorSchedulerDaemon struct {
 	DefaultSchedulerDaemon
-	loop       int
-	errorCount int
+	loop       int32
+	errorCount int32
 }
 
 func (d *testErrorSchedulerDaemon) When() CronSyntax {
@@ -273,10 +275,10 @@ func (d *testErrorSchedulerDaemon) When() CronSyntax {
 }
 
 func (d *testErrorSchedulerDaemon) Loop() error {
-	d.loop++
-	if d.loop%2 == 0 {
-		d.errorCount++
-		return fmt.Errorf("simulated error in loop %d", d.loop)
+	loop := atomic.AddInt32(&d.loop, 1)
+	if loop%2 == 0 {
+		atomic.AddInt32(&d.errorCount, 1)
+		return fmt.Errorf("simulated error in loop %d", loop)
 	}
 	return nil
 }
@@ -317,9 +319,9 @@ func (d *testComplexSchedulerDaemon) Stop(sig os.Signal) {
 type testStateTransitionSchedulerDaemon struct {
 	DefaultSchedulerDaemon
 	t           *testing.T
-	startCalled bool
-	loopCalled  bool
-	stopCalled  bool
+	startCalled int32
+	loopCalled  int32
+	stopCalled  int32
 }
 
 func (d *testStateTransitionSchedulerDaemon) When() CronSyntax {
@@ -328,16 +330,16 @@ func (d *testStateTransitionSchedulerDaemon) When() CronSyntax {
 
 func (d *testStateTransitionSchedulerDaemon) Start() {
 	assert.Equal(d.t, StateRun, d.State())
-	d.startCalled = true
+	atomic.StoreInt32(&d.startCalled, 1)
 }
 
 func (d *testStateTransitionSchedulerDaemon) Loop() error {
 	assert.Equal(d.t, StateRun, d.State())
-	d.loopCalled = true
+	atomic.StoreInt32(&d.loopCalled, 1)
 	return nil
 }
 
 func (d *testStateTransitionSchedulerDaemon) Stop(sig os.Signal) {
 	assert.Equal(d.t, StateStop, d.State())
-	d.stopCalled = true
+	atomic.StoreInt32(&d.stopCalled, 1)
 }

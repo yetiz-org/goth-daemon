@@ -22,6 +22,7 @@ type DaemonService struct {
 	// stop all daemon when get kill signal, default: `true`
 	StopWhenKill          bool
 	orderIndex            int
+	orderMutex            sync.Mutex // Protects orderIndex access
 	sig                   chan os.Signal
 	stopFuture            concurrent.Future
 	shutdownFuture        concurrent.Future
@@ -29,6 +30,7 @@ type DaemonService struct {
 	state                 int32
 	shutdownState         int32
 	invokeLoopDaemonTimer *time.Timer
+	timerMutex            sync.Mutex          // Protects invokeLoopDaemonTimer and stopFuture access
 
 	// Slice cache optimization fields
 	daemonEntityCache []*DaemonEntity // Cache sorted daemon entity slice (includes only TimerDaemon and SchedulerDaemon)
@@ -93,8 +95,12 @@ func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
 	if v, loaded := s.DaemonMap.LoadOrStore(name, &DaemonEntity{Name: name, Daemon: daemon}); loaded {
 		return fmt.Errorf("name is exist")
 	} else {
+		s.orderMutex.Lock()
 		s.orderIndex++
-		v.(*DaemonEntity).Order = s.orderIndex
+		order := s.orderIndex
+		s.orderMutex.Unlock()
+		
+		v.(*DaemonEntity).Order = order
 		// Daemon registered successfully, invalidate cache
 		s.invalidateDaemonCache()
 	}
@@ -171,6 +177,9 @@ func (s *DaemonService) UnregisterDaemon(name string) error {
 }
 
 func (s *DaemonService) entitySetNext(entity *DaemonEntity) {
+	entity.nextMutex.Lock()
+	defer entity.nextMutex.Unlock()
+	
 	switch daemon := entity.Daemon.(type) {
 	case TimerDaemon:
 		interval := daemon.Interval()
@@ -214,7 +223,12 @@ func (s *DaemonService) getOrderedDaemonEntitySlice() []*DaemonEntity {
 	})
 
 	sort.Slice(el, func(i, j int) bool {
-		return el[i].Next.Before(el[j].Next)
+		el[i].nextMutex.RLock()
+		el[j].nextMutex.RLock()
+		result := el[i].Next.Before(el[j].Next)
+		el[j].nextMutex.RUnlock()
+		el[i].nextMutex.RUnlock()
+		return result
 	})
 
 	// Update cache
@@ -275,8 +289,11 @@ func (s *DaemonService) StartDaemon(entity *DaemonEntity) kkpanic.Caught {
 }
 
 func (s *DaemonService) _LoopInvoker() {
+	s.timerMutex.Lock()
 	s.invokeLoopDaemonTimer = time.NewTimer(time.Second)
 	s.invokeLoopDaemonTimer.Stop()
+	s.timerMutex.Unlock()
+	
 	go func(s *DaemonService) {
 		for {
 			now := time.Now()
@@ -327,10 +344,13 @@ func (s *DaemonService) _LoopInvoker() {
 				s.invalidateDaemonCache()
 			}
 
+			s.timerMutex.Lock()
 			timer := s.invokeLoopDaemonTimer
 			if timer == nil {
+				s.timerMutex.Unlock()
 				return
 			}
+			s.timerMutex.Unlock()
 
 			wait := next.Sub(now)
 			if next.Before(now) {
@@ -338,15 +358,23 @@ func (s *DaemonService) _LoopInvoker() {
 			}
 
 			timer.Reset(wait)
+			
+			// Get stopFuture safely
+			s.timerMutex.Lock()
+			stopFuture := s.stopFuture
+			s.timerMutex.Unlock()
+			
 			select {
 			case <-timer.C:
 				continue
 			case <-s.loopInvokerReload:
+				s.timerMutex.Lock()
 				if currentTimer := s.invokeLoopDaemonTimer; currentTimer != nil {
 					currentTimer.Stop()
 				}
+				s.timerMutex.Unlock()
 				continue
-			case <-s.stopFuture.Done():
+			case <-stopFuture.Done():
 				return
 			}
 		}
@@ -359,11 +387,15 @@ func (s *DaemonService) Stop(sig os.Signal) error {
 	}
 
 	defer func(s *DaemonService) {
+		s.timerMutex.Lock()
 		s.stopFuture = concurrent.NewFuture()
-		s.state = StateWait
+		s.timerMutex.Unlock()
+		atomic.StoreInt32(&s.state, StateWait)
 	}(s)
 
+	s.timerMutex.Lock()
 	s.stopFuture.Completable().Complete(nil)
+	s.timerMutex.Unlock()
 
 	// Use cache to get all daemons
 	el := s.getAllDaemonEntitySlice()
@@ -372,10 +404,12 @@ func (s *DaemonService) Stop(sig os.Signal) error {
 		return el[i].Order > el[j].Order
 	})
 
+	s.timerMutex.Lock()
 	if s.invokeLoopDaemonTimer != nil {
 		s.invokeLoopDaemonTimer.Stop()
 		s.invokeLoopDaemonTimer = nil
 	}
+	s.timerMutex.Unlock()
 
 	for _, entity := range el {
 		if c := s.StopDaemon(entity, sig); c != nil {

@@ -3,6 +3,8 @@ package kkdaemon
 import (
 	"fmt"
 	"os"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -26,6 +28,7 @@ type DaemonEntity struct {
 	Daemon Daemon
 	Order  int
 	Next   time.Time
+	nextMutex sync.RWMutex // Protects Next field access
 }
 
 type Daemon interface {
@@ -52,7 +55,7 @@ func (d *DefaultDaemon) Registered() error {
 }
 
 func (d *DefaultDaemon) State() int32 {
-	return d.state
+	return atomic.LoadInt32(&d.state)
 }
 
 func (d *DefaultDaemon) Start() {

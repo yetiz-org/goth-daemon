@@ -11,31 +11,69 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// Test utility functions for proper test isolation
+func resetGlobalService() {
+	// Stop the service if it's running
+	if DefaultService.state == StateStart {
+		DefaultService.Stop(syscall.SIGTERM)
+	}
+	
+	// Clear all registered daemons
+	DefaultService.DaemonMap.Range(func(key, value interface{}) bool {
+		DefaultService.DaemonMap.Delete(key)
+		return true
+	})
+	
+	// Reset service state
+	atomic.StoreInt32(&DefaultService.state, StateWait)
+	atomic.StoreInt32(&DefaultService.shutdownState, 0)
+	DefaultService.orderIndex = 0
+	
+	// Invalidate caches
+	DefaultService.invalidateDaemonCache()
+	
+	// Stop loop invoker timer if running (with proper synchronization)
+	DefaultService.timerMutex.Lock()
+	if DefaultService.invokeLoopDaemonTimer != nil {
+		DefaultService.invokeLoopDaemonTimer.Stop()
+		DefaultService.invokeLoopDaemonTimer = nil
+	}
+	DefaultService.timerMutex.Unlock()
+}
+
+func setupTest(t *testing.T) func() {
+	resetGlobalService()
+	return func() {
+		resetGlobalService()
+	}
+}
+
 func TestTimerDaemon(t *testing.T) {
 	daemon := &testTimerDaemon{}
 	assert.Nil(t, RegisterDaemon(daemon))
 	daemon2 := &testTimerDaemon2{}
 	assert.Nil(t, RegisterDaemon(daemon2))
 	Start()
-	assert.Equal(t, 1, daemon.start)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&daemon.start))
 	<-time.After(time.Second * 1)
-	// 調整測試期望值：考慮到緩存優化對定時精度有顯著影響
-	// 10ms間隔在1秒內理論上應執行100次，但緩存優化降低了執行頻率
-	// 根據實際測試結果，調整為更現實的期望值
-	assert.True(t, daemon.loop >= 15, "Expected at least 15 executions in 1 second, got %d", daemon.loop)
-	assert.True(t, daemon.loop <= 150, "Expected at most 150 executions in 1 second, got %d", daemon.loop)
-	assert.True(t, daemon2.loop > 15)
+	// Adjusted test expectations: considering cache optimization has significant impact on timing precision
+	// 10ms interval should theoretically execute 100 times in 1 second, but cache optimization reduces execution frequency
+	// Adjusted to more realistic expectations based on actual test results
+	loopCount := atomic.LoadInt32(&daemon.loop)
+	assert.True(t, loopCount >= 15, "Expected at least 15 executions in 1 second, got %d", loopCount)
+	assert.True(t, loopCount <= 150, "Expected at most 150 executions in 1 second, got %d", loopCount)
+	assert.True(t, atomic.LoadInt32(&daemon2.loop) > 15)
 	Stop(syscall.SIGKILL)
 	assert.Equal(t, "testTimerDaemon", daemon.Name())
 	assert.Equal(t, "testTimerDaemon2", daemon2.Name())
-	assert.Equal(t, 1, daemon.stop)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&daemon.stop))
 }
 
 type testTimerDaemon struct {
 	DefaultTimerDaemon
-	start int
-	loop  int
-	stop  int
+	start int32
+	loop  int32
+	stop  int32
 }
 
 func (d *testTimerDaemon) Interval() time.Duration {
@@ -43,23 +81,23 @@ func (d *testTimerDaemon) Interval() time.Duration {
 }
 
 func (d *testTimerDaemon) Start() {
-	d.start = 1
+	atomic.StoreInt32(&d.start, 1)
 }
 
 func (d *testTimerDaemon) Loop() error {
-	d.loop++
+	atomic.AddInt32(&d.loop, 1)
 	return nil
 }
 
 func (d *testTimerDaemon) Stop(sig os.Signal) {
-	d.stop = 1
+	atomic.StoreInt32(&d.stop, 1)
 }
 
 type testTimerDaemon2 struct {
 	DefaultTimerDaemon
-	start int
-	loop  int
-	stop  int
+	start int32
+	loop  int32
+	stop  int32
 }
 
 func (d *testTimerDaemon2) Interval() time.Duration {
@@ -67,41 +105,41 @@ func (d *testTimerDaemon2) Interval() time.Duration {
 }
 
 func (d *testTimerDaemon2) Start() {
-	d.start = 1
+	atomic.StoreInt32(&d.start, 1)
 }
 
 func (d *testTimerDaemon2) Loop() error {
-	d.loop++
+	atomic.AddInt32(&d.loop, 1)
 	return nil
 }
 
 func (d *testTimerDaemon2) Stop(sig os.Signal) {
-	d.stop = 1
+	atomic.StoreInt32(&d.stop, 1)
 }
 
-// TestTimerDaemonEdgeCases 測試 TimerDaemon 的邊界條件
+// TestTimerDaemonEdgeCases tests TimerDaemon edge cases
 func TestTimerDaemonEdgeCases(t *testing.T) {
-	// 測試極小間隔的定時器
+	// Test timer with very short interval
 	shortDaemon := &testShortIntervalDaemon{}
 	assert.Nil(t, RegisterDaemon(shortDaemon))
 
-	// 測試極大間隔的定時器
+	// Test timer with very long interval
 	longDaemon := &testLongIntervalDaemon{}
 	assert.Nil(t, RegisterDaemon(longDaemon))
 
 	Start()
 
-	// 等待短間隔定時器執行多次
+	// Wait for short interval timer to execute multiple times
 	time.Sleep(500 * time.Millisecond)
 	assert.True(t, shortDaemon.loop > 10, "Short interval daemon should execute many times")
 
-	// 長間隔定時器應該不會執行
+	// Long interval timer should not execute
 	assert.Equal(t, 0, longDaemon.loop, "Long interval daemon should not execute within short time")
 
 	Stop(syscall.SIGTERM)
 }
 
-// TestTimerDaemonWithErrors 測試 TimerDaemon 的錯誤處理
+// TestTimerDaemonWithErrors tests TimerDaemon error handling
 func TestTimerDaemonWithErrors(t *testing.T) {
 	daemon := &testErrorTimerDaemon{}
 	assert.Nil(t, RegisterDaemon(daemon))
@@ -112,28 +150,28 @@ func TestTimerDaemonWithErrors(t *testing.T) {
 	// Timer runs every 50ms and errors every 3rd loop, wait 2 seconds to be safe
 	time.Sleep(2 * time.Second)
 
-	// 即使 Loop() 返回錯誤，daemon 仍應繼續運行
-	assert.True(t, daemon.loop > 0)
-	assert.True(t, daemon.errorCount > 0)
+	// Even if Loop() returns error, daemon should continue running
+	assert.True(t, atomic.LoadInt32(&daemon.loop) > 0)
+	assert.True(t, atomic.LoadInt32(&daemon.errorCount) > 0)
 
 	assert.Nil(t, Stop(syscall.SIGKILL))
 }
 
-// TestDefaultTimerDaemonMethods 測試 DefaultTimerDaemon 的方法
+// TestDefaultTimerDaemonMethods tests DefaultTimerDaemon methods
 func TestDefaultTimerDaemonMethods(t *testing.T) {
 	daemon := &DefaultTimerDaemon{}
 	daemon.setName("defaultTimer")
 
-	// 測試基本方法
+	// Test basic methods
 	assert.Equal(t, "defaultTimer", daemon.Name())
 	assert.Equal(t, StateWait, daemon.State())
 	assert.Equal(t, time.Minute, daemon.Interval())
 
-	// 測試 Loop 方法（應該是空實現）
+	// Test Loop method (should be empty implementation)
 	err := daemon.Loop()
 	assert.NoError(t, err)
 
-	// 測試 Registered 方法
+	// Test Registered method
 	err = daemon.Registered()
 	assert.NoError(t, err)
 }
@@ -151,31 +189,34 @@ func TestTimerDaemonStateTransitions(t *testing.T) {
 	// 啟動服務以啟動循環調用器
 	assert.Nil(t, Start())
 	assert.Equal(t, StateStart, daemon.State())
-	assert.True(t, daemon.startCalled)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&daemon.startCalled))
 
 	// 等待至少一次 Loop 執行
 	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && !daemon.loopCalled {
+	for time.Now().Before(deadline) && atomic.LoadInt32(&daemon.loopCalled) == 0 {
 		time.Sleep(10 * time.Millisecond)
 	}
-	assert.True(t, daemon.loopCalled, "Loop should have been called within 5 seconds")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&daemon.loopCalled), "Loop should have been called within 5 seconds")
 
 	assert.Nil(t, Stop(syscall.SIGTERM))
 	assert.Equal(t, StateWait, daemon.State())
-	assert.True(t, daemon.stopCalled)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&daemon.stopCalled))
 }
 
-// TestTimerDaemonConcurrentExecution 測試 TimerDaemon 的並發執行
+// TestTimerDaemonConcurrentExecution tests TimerDaemon concurrent execution
 func TestTimerDaemonConcurrentExecution(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
 	daemon := &testConcurrentTimerDaemon{}
 	assert.Nil(t, RegisterDaemon(daemon))
 
 	assert.Nil(t, Start())
 
-	// 等待多次循環執行
+	// Wait for multiple loop executions
 	time.Sleep(300 * time.Millisecond)
 
-	// 檢查沒有並發執行衝突
+	// Check for no concurrent execution conflicts
 	executionCount := atomic.LoadInt32(&daemon.executionCount)
 	maxConcurrent := atomic.LoadInt32(&daemon.maxConcurrent)
 
@@ -185,24 +226,27 @@ func TestTimerDaemonConcurrentExecution(t *testing.T) {
 	assert.Nil(t, Stop(syscall.SIGTERM))
 }
 
-// TestTimerDaemonIntervalPrecision 測試 TimerDaemon 間隔的精確性
+// TestTimerDaemonIntervalPrecision tests TimerDaemon interval precision
 func TestTimerDaemonIntervalPrecision(t *testing.T) {
+	cleanup := setupTest(t)
+	defer cleanup()
+
 	daemon := &testPrecisionTimerDaemon{}
 	assert.Nil(t, RegisterDaemon(daemon))
 
 	startTime := time.Now()
 	assert.Nil(t, Start())
 
-	// 等待幾次執行
+	// Wait for several executions
 	time.Sleep(550 * time.Millisecond)
 
 	executions := atomic.LoadInt32(&daemon.executionCount)
 	elapsed := time.Since(startTime)
 
-	// 檢查執行頻率是否接近預期（允許一些誤差）
+	// Check if execution frequency is close to expected (allowing some margin)
 	expectedExecutions := float64(elapsed) / float64(100*time.Millisecond)
-	// 增加容忍度以適應緩存優化對定時精度的影響
-	tolerancePercent := 1.0 // 100% 容忍度百分比，允許緩存優化的影響
+	// Increase tolerance to accommodate cache optimization effects on timing precision
+	tolerancePercent := 1.0 // 100% tolerance percentage, allowing for cache optimization effects
 	tolerance := expectedExecutions * tolerancePercent
 
 	assert.True(t, float64(executions) >= expectedExecutions-tolerance &&
@@ -251,8 +295,8 @@ func (d *testLongIntervalDaemon) Stop(sig os.Signal) {}
 // testErrorTimerDaemon 用於測試錯誤處理的定時器 daemon
 type testErrorTimerDaemon struct {
 	DefaultTimerDaemon
-	loop       int
-	errorCount int
+	loop       int32
+	errorCount int32
 }
 
 func (d *testErrorTimerDaemon) Interval() time.Duration {
@@ -260,10 +304,10 @@ func (d *testErrorTimerDaemon) Interval() time.Duration {
 }
 
 func (d *testErrorTimerDaemon) Loop() error {
-	d.loop++
-	if d.loop%3 == 0 {
-		d.errorCount++
-		return fmt.Errorf("simulated error in timer loop %d", d.loop)
+	loop := atomic.AddInt32(&d.loop, 1)
+	if loop%3 == 0 {
+		atomic.AddInt32(&d.errorCount, 1)
+		return fmt.Errorf("simulated error in timer loop %d", loop)
 	}
 	return nil
 }
@@ -275,9 +319,9 @@ func (d *testErrorTimerDaemon) Stop(sig os.Signal) {}
 type testStateTimerDaemon struct {
 	DefaultTimerDaemon
 	t           *testing.T
-	startCalled bool
-	loopCalled  bool
-	stopCalled  bool
+	startCalled int32
+	loopCalled  int32
+	stopCalled  int32
 }
 
 func (d *testStateTimerDaemon) Interval() time.Duration {
@@ -286,18 +330,18 @@ func (d *testStateTimerDaemon) Interval() time.Duration {
 
 func (d *testStateTimerDaemon) Start() {
 	assert.Equal(d.t, StateRun, d.State())
-	d.startCalled = true
+	atomic.StoreInt32(&d.startCalled, 1)
 }
 
 func (d *testStateTimerDaemon) Loop() error {
 	assert.Equal(d.t, StateRun, d.State())
-	d.loopCalled = true
+	atomic.StoreInt32(&d.loopCalled, 1)
 	return nil
 }
 
 func (d *testStateTimerDaemon) Stop(sig os.Signal) {
 	assert.Equal(d.t, StateStop, d.State())
-	d.stopCalled = true
+	atomic.StoreInt32(&d.stopCalled, 1)
 }
 
 // testConcurrentTimerDaemon 用於測試並發執行的定時器 daemon
