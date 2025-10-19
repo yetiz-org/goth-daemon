@@ -30,7 +30,7 @@ type DaemonService struct {
 	state                 int32
 	shutdownState         int32
 	invokeLoopDaemonTimer *time.Timer
-	timerMutex            sync.Mutex          // Protects invokeLoopDaemonTimer and stopFuture access
+	timerMutex            sync.Mutex // Protects invokeLoopDaemonTimer and stopFuture access
 
 	// Slice cache optimization fields
 	daemonEntityCache []*DaemonEntity // Cache sorted daemon entity slice (includes only TimerDaemon and SchedulerDaemon)
@@ -99,7 +99,7 @@ func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
 		s.orderIndex++
 		order := s.orderIndex
 		s.orderMutex.Unlock()
-		
+
 		v.(*DaemonEntity).Order = order
 		// Daemon registered successfully, invalidate cache
 		s.invalidateDaemonCache()
@@ -179,7 +179,7 @@ func (s *DaemonService) UnregisterDaemon(name string) error {
 func (s *DaemonService) entitySetNext(entity *DaemonEntity) {
 	entity.nextMutex.Lock()
 	defer entity.nextMutex.Unlock()
-	
+
 	switch daemon := entity.Daemon.(type) {
 	case TimerDaemon:
 		interval := daemon.Interval()
@@ -293,13 +293,13 @@ func (s *DaemonService) _LoopInvoker() {
 	s.invokeLoopDaemonTimer = time.NewTimer(time.Second)
 	s.invokeLoopDaemonTimer.Stop()
 	s.timerMutex.Unlock()
-	
+
 	go func(s *DaemonService) {
 		for {
 			now := time.Now()
 			next := _MaxTime
 			needsCacheInvalidation := false
-			
+
 			for _, entity := range s.getOrderedDaemonEntitySlice() {
 				now = time.Now()
 				if entity.Next.Before(now) || entity.Next.Equal(now) {
@@ -307,12 +307,12 @@ func (s *DaemonService) _LoopInvoker() {
 						// Set next execution time immediately before starting goroutine
 						s.entitySetNext(entity)
 						needsCacheInvalidation = true
-						
+
 						go func(entity *DaemonEntity) {
 							defer func() {
 								atomic.StoreInt32(entity.Daemon._State(), StateStart)
 							}()
-							
+
 							if looper, ok := entity.Daemon.(Looper); ok {
 								kkpanic.Catch(func() {
 									kklogger.TraceJ("DaemonService._LoopInvoker#Run", entity.Name)
@@ -358,12 +358,12 @@ func (s *DaemonService) _LoopInvoker() {
 			}
 
 			timer.Reset(wait)
-			
+
 			// Get stopFuture safely
 			s.timerMutex.Lock()
 			stopFuture := s.stopFuture
 			s.timerMutex.Unlock()
-			
+
 			select {
 			case <-timer.C:
 				continue
@@ -456,7 +456,7 @@ func (s *DaemonService) ShutdownFuture() concurrent.Future {
 func (s *DaemonService) judgeStopWhenKill() {
 	go func(s *DaemonService) {
 		sig := <-s.sig
-		s.shutdownState = 1
+		atomic.StoreInt32(&s.shutdownState, 1)
 		if !s.StopWhenKill && sig != shutdownGracefullySignal {
 			s.shutdownFuture.Completable().Complete(sig)
 			return
