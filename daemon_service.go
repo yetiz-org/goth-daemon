@@ -22,7 +22,8 @@ type DaemonService struct {
 	// stop all daemon when get kill signal, default: `true`
 	StopWhenKill          bool
 	orderIndex            int
-	orderMutex            sync.Mutex // Protects orderIndex access
+	orderMutex            sync.Mutex // Protects orderIndex and usedOrders access
+	usedOrders            map[int]string // Tracks used orders: order -> daemon name
 	sig                   chan os.Signal
 	stopFuture            concurrent.Future
 	shutdownFuture        concurrent.Future
@@ -50,6 +51,7 @@ func NewDaemonService() *DaemonService {
 		stopFuture:        concurrent.NewFuture(),
 		shutdownFuture:    concurrent.NewFuture(),
 		loopInvokerReload: make(chan int),
+		usedOrders:        make(map[int]string),
 	}
 
 	signal.Notify(ds.sig, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGTERM, syscall.SIGHUP)
@@ -98,12 +100,65 @@ func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
 		s.orderMutex.Lock()
 		s.orderIndex++
 		order := s.orderIndex
+		s.usedOrders[order] = name // Track auto-assigned order
 		s.orderMutex.Unlock()
 
 		v.(*DaemonEntity).Order = order
 		// Daemon registered successfully, invalidate cache
 		s.invalidateDaemonCache()
 	}
+
+	atomic.StoreInt32(daemon._State(), StateWait)
+	return daemon.Registered()
+}
+
+// RegisterDaemonWithOrder registers a daemon with a specific order.
+// Order determines startup and shutdown sequence:
+//   - Lower order values start earlier (Start phase)
+//   - Higher order values stop earlier (Stop phase)
+// This ensures dependencies are handled correctly: services that start first, stop last.
+//
+// Panics if the specified order is already used by another daemon.
+func (s *DaemonService) RegisterDaemonWithOrder(daemon Daemon, order int) error {
+	if daemon == nil {
+		return fmt.Errorf("nil daemon")
+	}
+
+	name := daemon.Name()
+	if name == "" {
+		name = reflect.TypeOf(daemon).Elem().Name()
+	}
+
+	if name == "" {
+		return fmt.Errorf("name is empty")
+	}
+
+	if daemon.Name() != name {
+		if cast, ok := daemon.(daemonSetName); ok {
+			cast.setName(name)
+		}
+	}
+
+	// Check for order conflict
+	s.orderMutex.Lock()
+	if existingName, exists := s.usedOrders[order]; exists {
+		s.orderMutex.Unlock()
+		panic(fmt.Sprintf("order %d is already used by daemon '%s', cannot register daemon '%s' with the same order", order, existingName, name))
+	}
+	s.usedOrders[order] = name
+	s.orderMutex.Unlock()
+
+	// Register daemon with specified order
+	if _, loaded := s.DaemonMap.LoadOrStore(name, &DaemonEntity{Name: name, Daemon: daemon, Order: order}); loaded {
+		// Rollback usedOrders if daemon name already exists
+		s.orderMutex.Lock()
+		delete(s.usedOrders, order)
+		s.orderMutex.Unlock()
+		return fmt.Errorf("name is exist")
+	}
+
+	// Daemon registered successfully, invalidate cache
+	s.invalidateDaemonCache()
 
 	atomic.StoreInt32(daemon._State(), StateWait)
 	return daemon.Registered()
@@ -160,12 +215,18 @@ func (s *DaemonService) getAllDaemonEntitySlice() []*DaemonEntity {
 
 func (s *DaemonService) UnregisterDaemon(name string) error {
 	if v, f := s.DaemonMap.Load(name); f {
+		entity := v.(*DaemonEntity)
 		var c kkpanic.Caught
 		kkpanic.Try(func() {
-			c = s.StopDaemon(v.(*DaemonEntity), unregisterSignal)
+			c = s.StopDaemon(entity, unregisterSignal)
 		}).CatchAll(func(caught kkpanic.Caught) {
 			c = caught
 		})
+
+		// Clean up usedOrders map
+		s.orderMutex.Lock()
+		delete(s.usedOrders, entity.Order)
+		s.orderMutex.Unlock()
 
 		s.DaemonMap.Delete(name)
 		// Daemon unregistered successfully, invalidate cache

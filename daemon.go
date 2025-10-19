@@ -24,10 +24,10 @@ const unregisterSignal = syscall.Signal(0xfe)
 var _MaxTime = time.Unix(1<<63-62135596801, 999999999)
 
 type DaemonEntity struct {
-	Name   string
-	Daemon Daemon
-	Order  int
-	Next   time.Time
+	Name      string
+	Daemon    Daemon
+	Order     int
+	Next      time.Time
 	nextMutex sync.RWMutex // Protects Next field access
 }
 
@@ -102,6 +102,10 @@ func (s *_SimpleDaemon) Stop(sig os.Signal) {
 
 func RegisterDaemon(daemon Daemon) error {
 	return DefaultService.RegisterDaemon(daemon)
+}
+
+func RegisterDaemonWithOrder(daemon Daemon, order int) error {
+	return DefaultService.RegisterDaemonWithOrder(daemon, order)
 }
 
 func RegisterSimpleDaemon(name string, startFunc func(), stopFunc func(sig os.Signal)) error {
