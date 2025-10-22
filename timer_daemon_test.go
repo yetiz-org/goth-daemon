@@ -176,22 +176,22 @@ func TestDefaultTimerDaemonMethods(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestTimerDaemonStateTransitions 測試 TimerDaemon 的狀態轉換
+// TestTimerDaemonStateTransitions tests TimerDaemon state transitions
 func TestTimerDaemonStateTransitions(t *testing.T) {
 	daemon := &testStateTimerDaemon{t: t}
 
-	// 初始狀態
+	// Initial state
 	assert.Equal(t, StateWait, daemon.State())
 
 	assert.Nil(t, RegisterDaemon(daemon))
 	assert.Equal(t, StateWait, daemon.State())
 
-	// 啟動服務以啟動循環調用器
+	// Start service to activate loop invoker
 	assert.Nil(t, Start())
 	assert.Equal(t, StateStart, daemon.State())
 	assert.Equal(t, int32(1), atomic.LoadInt32(&daemon.startCalled))
 
-	// 等待至少一次 Loop 執行
+	// Wait for at least one Loop execution
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) && atomic.LoadInt32(&daemon.loopCalled) == 0 {
 		time.Sleep(10 * time.Millisecond)
@@ -256,14 +256,14 @@ func TestTimerDaemonIntervalPrecision(t *testing.T) {
 	assert.Nil(t, Stop(syscall.SIGTERM))
 }
 
-// testShortIntervalDaemon 用於測試極短間隔的定時器 daemon
+// testShortIntervalDaemon is a timer daemon for testing extremely short intervals
 type testShortIntervalDaemon struct {
 	DefaultTimerDaemon
 	loop int
 }
 
 func (d *testShortIntervalDaemon) Interval() time.Duration {
-	return 10 * time.Millisecond // 極短間隔
+	return 10 * time.Millisecond // Extremely short interval
 }
 
 func (d *testShortIntervalDaemon) Loop() error {
@@ -274,14 +274,14 @@ func (d *testShortIntervalDaemon) Loop() error {
 func (d *testShortIntervalDaemon) Start()             {}
 func (d *testShortIntervalDaemon) Stop(sig os.Signal) {}
 
-// testLongIntervalDaemon 用於測試極長間隔的定時器 daemon
+// testLongIntervalDaemon is a timer daemon for testing extremely long intervals
 type testLongIntervalDaemon struct {
 	DefaultTimerDaemon
 	loop int
 }
 
 func (d *testLongIntervalDaemon) Interval() time.Duration {
-	return 1 * time.Hour // 極長間隔
+	return 1 * time.Hour // Extremely long interval
 }
 
 func (d *testLongIntervalDaemon) Loop() error {
@@ -292,7 +292,7 @@ func (d *testLongIntervalDaemon) Loop() error {
 func (d *testLongIntervalDaemon) Start()             {}
 func (d *testLongIntervalDaemon) Stop(sig os.Signal) {}
 
-// testErrorTimerDaemon 用於測試錯誤處理的定時器 daemon
+// testErrorTimerDaemon is a timer daemon for testing error handling
 type testErrorTimerDaemon struct {
 	DefaultTimerDaemon
 	loop       int32
@@ -315,7 +315,7 @@ func (d *testErrorTimerDaemon) Loop() error {
 func (d *testErrorTimerDaemon) Start()             {}
 func (d *testErrorTimerDaemon) Stop(sig os.Signal) {}
 
-// testStateTimerDaemon 用於測試狀態轉換的定時器 daemon
+// testStateTimerDaemon is a timer daemon for testing state transitions
 type testStateTimerDaemon struct {
 	DefaultTimerDaemon
 	t           *testing.T
@@ -344,7 +344,7 @@ func (d *testStateTimerDaemon) Stop(sig os.Signal) {
 	atomic.StoreInt32(&d.stopCalled, 1)
 }
 
-// testConcurrentTimerDaemon 用於測試並發執行的定時器 daemon
+// testConcurrentTimerDaemon is a timer daemon for testing concurrent execution
 type testConcurrentTimerDaemon struct {
 	DefaultTimerDaemon
 	executionCount int32
@@ -360,7 +360,7 @@ func (d *testConcurrentTimerDaemon) Loop() error {
 	current := atomic.AddInt32(&d.currentRunning, 1)
 	defer atomic.AddInt32(&d.currentRunning, -1)
 
-	// 更新最大並發數
+	// Update maximum concurrent count
 	for {
 		max := atomic.LoadInt32(&d.maxConcurrent)
 		if current <= max || atomic.CompareAndSwapInt32(&d.maxConcurrent, max, current) {
@@ -369,14 +369,14 @@ func (d *testConcurrentTimerDaemon) Loop() error {
 	}
 
 	atomic.AddInt32(&d.executionCount, 1)
-	time.Sleep(10 * time.Millisecond) // 模擬一些工作
+	time.Sleep(10 * time.Millisecond) // Simulate some work
 	return nil
 }
 
 func (d *testConcurrentTimerDaemon) Start()             {}
 func (d *testConcurrentTimerDaemon) Stop(sig os.Signal) {}
 
-// testPrecisionTimerDaemon 用於測試間隔精確性的定時器 daemon
+// testPrecisionTimerDaemon is a timer daemon for testing interval precision
 type testPrecisionTimerDaemon struct {
 	DefaultTimerDaemon
 	executionCount int32

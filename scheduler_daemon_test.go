@@ -29,8 +29,8 @@ func TestSchedulerDaemon(t *testing.T) {
 	<-time.After(time.Second * 6)
 	assert.Equal(t, int32(0), atomic.LoadInt32(&testSchedulerPerFiveMinuteDaemon.loop))
 	assert.True(t, atomic.LoadInt32(&testSchedulerPerFiveSecondDaemon.loop) > 0)
-	// 調整測試期望值：考慮到緩存優化可能會略微影響調度精度
-	// 在6秒內至少應該執行3-4次（允許一些延遲和緩存影響）
+	// Adjust test expectations: accounting for cache optimization that may slightly affect scheduling precision
+	// Should execute at least 3-4 times in 6 seconds (allowing for some delay and cache effects)
 	loopCount := atomic.LoadInt32(&testSchedulerPerSecondDaemon.loop)
 	assert.True(t, loopCount >= 3, "Expected at least 3 executions in 6 seconds, got %d", loopCount)
 	assert.Nil(t, Stop(syscall.SIGKILL))
@@ -140,16 +140,16 @@ func (d *testSchedulerPerSecondDaemon) Stop(sig os.Signal) {
 	atomic.StoreInt32(&d.stop, 1)
 }
 
-// TestCronSyntaxEdgeCases 測試 CronSyntax 的邊界條件和錯誤處理
+// TestCronSyntaxEdgeCases tests CronSyntax edge cases and error handling
 func TestCronSyntaxEdgeCases(t *testing.T) {
-	// 測試有效的 cron 表達式
+	// Test valid cron expressions
 	validExpressions := []string{
-		"0 0 * * *",   // 每天午夜
-		"*/5 * * * *", // 每5分鐘
-		"0 9 * * 1-5", // 工作日上午9點
-		"0 0 1 1 *",   // 每年1月1日
-		"* * * * * *", // 每秒（含秒）
-		"0 0 29 2 *",  // 2月29日（閏年）
+		"0 0 * * *",   // Daily at midnight
+		"*/5 * * * *", // Every 5 minutes
+		"0 9 * * 1-5", // 9 AM on weekdays
+		"0 0 1 1 *",   // January 1st every year
+		"* * * * * *", // Every second (with seconds)
+		"0 0 29 2 *",  // February 29th (leap year)
 	}
 
 	now := time.Now()
@@ -160,17 +160,17 @@ func TestCronSyntaxEdgeCases(t *testing.T) {
 	}
 }
 
-// TestCronSyntaxErrorCases 測試 CronSyntax 錯誤場景
+// TestCronSyntaxErrorCases tests CronSyntax error scenarios
 func TestCronSyntaxErrorCases(t *testing.T) {
 	invalidExpressions := []string{
 		"invalid",
-		"* * * *",    // 缺少字段
-		"60 * * * *", // 無效的分鐘值
-		"* 25 * * *", // 無效的小時值
-		"* * 32 * *", // 無效的日期值
-		"* * * 13 *", // 無效的月份值
-		"* * * * 8",  // 無效的星期值
-		"",           // 空字符串
+		"* * * *",    // Missing field
+		"60 * * * *", // Invalid minute value
+		"* 25 * * *", // Invalid hour value
+		"* * 32 * *", // Invalid day value
+		"* * * 13 *", // Invalid month value
+		"* * * * 8",  // Invalid weekday value
+		"",           // Empty string
 	}
 
 	now := time.Now()
@@ -182,7 +182,7 @@ func TestCronSyntaxErrorCases(t *testing.T) {
 	}
 }
 
-// TestSchedulerDaemonWithErrors 測試 SchedulerDaemon 的錯誤處理
+// TestSchedulerDaemonWithErrors tests SchedulerDaemon error handling
 func TestSchedulerDaemonWithErrors(t *testing.T) {
 	daemon := &testErrorSchedulerDaemon{}
 	assert.Nil(t, RegisterDaemon(daemon))
@@ -193,65 +193,65 @@ func TestSchedulerDaemonWithErrors(t *testing.T) {
 	// Since the cron runs every second and errors on even loops, wait 5 seconds
 	time.Sleep(5 * time.Second)
 
-	// 即使 Loop() 返回錯誤，daemon 仍應繼續運行
+	// Even if Loop() returns error, daemon should continue running
 	assert.True(t, atomic.LoadInt32(&daemon.loop) > 0)
 	assert.True(t, atomic.LoadInt32(&daemon.errorCount) > 0)
 
 	assert.Nil(t, Stop(syscall.SIGKILL))
 }
 
-// TestDefaultSchedulerDaemonMethods 測試 DefaultSchedulerDaemon 的方法
+// TestDefaultSchedulerDaemonMethods tests DefaultSchedulerDaemon methods
 func TestDefaultSchedulerDaemonMethods(t *testing.T) {
 	daemon := &DefaultSchedulerDaemon{}
 	daemon.setName("defaultScheduler")
 
-	// 測試基本方法
+	// Test basic methods
 	assert.Equal(t, "defaultScheduler", daemon.Name())
 	assert.Equal(t, StateWait, daemon.State())
 	assert.Equal(t, CronSyntax("* * * * *"), daemon.When())
 
-	// 測試 Loop 方法（應該是空實現）
+	// Test Loop method (should be empty implementation)
 	err := daemon.Loop()
 	assert.NoError(t, err)
 
-	// 測試 Registered 方法
+	// Test Registered method
 	err = daemon.Registered()
 	assert.NoError(t, err)
 }
 
-// TestComplexCronExpressions 測試複雜的 cron 表達式
+// TestComplexCronExpressions tests complex cron expressions
 func TestComplexCronExpressions(t *testing.T) {
 	complexDaemon := &testComplexSchedulerDaemon{}
 	assert.Nil(t, RegisterDaemon(complexDaemon))
 
 	assert.Nil(t, Start())
 
-	// 檢查複雜表達式的下次執行時間計算
+	// Check next execution time calculation for complex expressions
 	entity := GetDaemon(complexDaemon.Name())
 	assert.NotNil(t, entity)
 
-	// 下次執行時間應該是合理的
+	// Next execution time should be reasonable
 	assert.True(t, entity.Next.After(time.Now()))
 
 	assert.Nil(t, Stop(syscall.SIGTERM))
 }
 
-// TestSchedulerDaemonStateTransitions 測試 SchedulerDaemon 的狀態轉換
+// TestSchedulerDaemonStateTransitions tests SchedulerDaemon state transitions
 func TestSchedulerDaemonStateTransitions(t *testing.T) {
 	daemon := &testStateTransitionSchedulerDaemon{t: t}
 
-	// 初始狀態
+	// Initial state
 	assert.Equal(t, StateWait, daemon.State())
 
 	assert.Nil(t, RegisterDaemon(daemon))
 	assert.Equal(t, StateWait, daemon.State())
 
-	// 啟動服務以啟動循環調用器
+	// Start service to activate loop invoker
 	assert.Nil(t, Start())
 	assert.Equal(t, StateStart, daemon.State())
 	assert.Equal(t, int32(1), atomic.LoadInt32(&daemon.startCalled))
 
-	// 等待至少一次 Loop 執行
+	// Wait for at least one Loop execution
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) && atomic.LoadInt32(&daemon.loopCalled) == 0 {
 		time.Sleep(100 * time.Millisecond)
@@ -263,7 +263,7 @@ func TestSchedulerDaemonStateTransitions(t *testing.T) {
 	assert.Equal(t, int32(1), atomic.LoadInt32(&daemon.stopCalled))
 }
 
-// testErrorSchedulerDaemon 用於測試錯誤處理的排程器 daemon
+// testErrorSchedulerDaemon is a scheduler daemon for testing error handling
 type testErrorSchedulerDaemon struct {
 	DefaultSchedulerDaemon
 	loop       int32
@@ -271,7 +271,7 @@ type testErrorSchedulerDaemon struct {
 }
 
 func (d *testErrorSchedulerDaemon) When() CronSyntax {
-	return "* * * * * *" // 每秒執行
+	return "* * * * * *" // Execute every second
 }
 
 func (d *testErrorSchedulerDaemon) Loop() error {
@@ -284,21 +284,21 @@ func (d *testErrorSchedulerDaemon) Loop() error {
 }
 
 func (d *testErrorSchedulerDaemon) Start() {
-	// 空實現
+	// Empty implementation
 }
 
 func (d *testErrorSchedulerDaemon) Stop(sig os.Signal) {
-	// 空實現
+	// Empty implementation
 }
 
-// testComplexSchedulerDaemon 用於測試複雜 cron 表達式的 daemon
+// testComplexSchedulerDaemon is a daemon for testing complex cron expressions
 type testComplexSchedulerDaemon struct {
 	DefaultSchedulerDaemon
 	loop int
 }
 
 func (d *testComplexSchedulerDaemon) When() CronSyntax {
-	// 複雜表達式：每個工作日的上午9點30分
+	// Complex expression: 9:30 AM every weekday
 	return "30 9 * * 1-5"
 }
 
@@ -308,14 +308,14 @@ func (d *testComplexSchedulerDaemon) Loop() error {
 }
 
 func (d *testComplexSchedulerDaemon) Start() {
-	// 空實現
+	// Empty implementation
 }
 
 func (d *testComplexSchedulerDaemon) Stop(sig os.Signal) {
-	// 空實現
+	// Empty implementation
 }
 
-// testStateTransitionSchedulerDaemon 用於測試狀態轉換的 daemon
+// testStateTransitionSchedulerDaemon is a daemon for testing state transitions
 type testStateTransitionSchedulerDaemon struct {
 	DefaultSchedulerDaemon
 	t           *testing.T
@@ -325,7 +325,7 @@ type testStateTransitionSchedulerDaemon struct {
 }
 
 func (d *testStateTransitionSchedulerDaemon) When() CronSyntax {
-	return "* * * * * *" // 每秒執行以便快速測試
+	return "* * * * * *" // Execute every second for fast testing
 }
 
 func (d *testStateTransitionSchedulerDaemon) Start() {

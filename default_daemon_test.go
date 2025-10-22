@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestDefaultDaemonMethods 測試 DefaultDaemon 的所有方法
+// TestDefaultDaemonMethods tests all methods of DefaultDaemon
 func TestDefaultDaemonMethods(t *testing.T) {
 	daemon := &DefaultDaemon{
 		name:   "testDefault",
@@ -18,51 +18,51 @@ func TestDefaultDaemonMethods(t *testing.T) {
 		Params: make(map[string]interface{}),
 	}
 	
-	// 測試 Name 方法
+	// Test Name method
 	assert.Equal(t, "testDefault", daemon.Name())
 	
-	// 測試 State 方法
+	// Test State method
 	assert.Equal(t, StateWait, daemon.State())
 	
-	// 測試 _State 方法
+	// Test _State method
 	statePtr := daemon._State()
 	assert.NotNil(t, statePtr)
 	assert.Equal(t, StateWait, *statePtr)
 	
-	// 測試 Registered 方法（空實現）
+	// Test Registered method (empty implementation)
 	err := daemon.Registered()
 	assert.NoError(t, err)
 	
-	// 測試 Start 方法（空實現）
-	daemon.Start() // 不應該 panic
+	// Test Start method (empty implementation)
+	daemon.Start() // Should not panic
 	
-	// 測試 Stop 方法（空實現）
-	daemon.Stop(syscall.SIGTERM) // 不應該 panic
+	// Test Stop method (empty implementation)
+	daemon.Stop(syscall.SIGTERM) // Should not panic
 }
 
-// TestDefaultDaemonSetName 測試 DefaultDaemon 的 setName 方法
+// TestDefaultDaemonSetName tests DefaultDaemon's setName method
 func TestDefaultDaemonSetName(t *testing.T) {
 	daemon := &DefaultDaemon{}
 	
-	// 初始名稱應該為空
+	// Initial name should be empty
 	assert.Equal(t, "", daemon.Name())
 	
-	// 設置名稱
+	// Set name
 	daemon.setName("newName")
 	assert.Equal(t, "newName", daemon.Name())
 	
-	// 重新設置名稱
+	// Reset name
 	daemon.setName("anotherName")
 	assert.Equal(t, "anotherName", daemon.Name())
 }
 
-// TestDefaultDaemonParams 測試 DefaultDaemon 的 Params 屬性
+// TestDefaultDaemonParams tests DefaultDaemon's Params property
 func TestDefaultDaemonParams(t *testing.T) {
 	daemon := &DefaultDaemon{
 		Params: make(map[string]interface{}),
 	}
 	
-	// 測試添加參數
+	// Test adding parameters
 	daemon.Params["key1"] = "value1"
 	daemon.Params["key2"] = 42
 	daemon.Params["key3"] = true
@@ -71,18 +71,18 @@ func TestDefaultDaemonParams(t *testing.T) {
 	assert.Equal(t, 42, daemon.Params["key2"])
 	assert.Equal(t, true, daemon.Params["key3"])
 	
-	// 測試參數數量
+	// Test parameter count
 	assert.Equal(t, 3, len(daemon.Params))
 }
 
-// TestDefaultDaemonStateManagement 測試 DefaultDaemon 的狀態管理
+// TestDefaultDaemonStateManagement tests DefaultDaemon's state management
 func TestDefaultDaemonStateManagement(t *testing.T) {
 	daemon := &DefaultDaemon{}
 	
-	// 初始狀態應該是 StateWait
+	// Initial state should be StateWait
 	assert.Equal(t, StateWait, daemon.State())
 	
-	// 直接修改狀態（模擬內部狀態變更）
+	// Directly modify state (simulate internal state changes)
 	*daemon._State() = StateStart
 	assert.Equal(t, StateStart, daemon.State())
 	
@@ -96,7 +96,7 @@ func TestDefaultDaemonStateManagement(t *testing.T) {
 	assert.Equal(t, StateWait, daemon.State())
 }
 
-// TestSimpleDaemonCreation 測試 SimpleDaemon 的創建和基本方法
+// TestSimpleDaemonCreation tests SimpleDaemon creation and basic methods
 func TestSimpleDaemonCreation(t *testing.T) {
 	var startCalled, stopCalled bool
 	var stopSignal os.Signal
@@ -110,7 +110,7 @@ func TestSimpleDaemonCreation(t *testing.T) {
 		stopSignal = sig
 	}
 	
-	// 創建 SimpleDaemon
+	// Create SimpleDaemon
 	simpleDaemon := &_SimpleDaemon{
 		DefaultDaemon: DefaultDaemon{
 			name: "testSimple",
@@ -119,21 +119,21 @@ func TestSimpleDaemonCreation(t *testing.T) {
 		StopFunc:  stopFunc,
 	}
 	
-	// 測試基本方法
+	// Test basic methods
 	assert.Equal(t, "testSimple", simpleDaemon.Name())
 	assert.Equal(t, StateWait, simpleDaemon.State())
 	
-	// 測試 Start 方法
+	// Test Start method
 	simpleDaemon.Start()
 	assert.True(t, startCalled)
 	
-	// 測試 Stop 方法
+	// Test Stop method
 	simpleDaemon.Stop(syscall.SIGINT)
 	assert.True(t, stopCalled)
 	assert.Equal(t, syscall.SIGINT, stopSignal)
 }
 
-// TestSimpleDaemonWithNilFunctions 測試帶有 nil 函數的 SimpleDaemon
+// TestSimpleDaemonWithNilFunctions tests SimpleDaemon with nil functions
 func TestSimpleDaemonWithNilFunctions(t *testing.T) {
 	simpleDaemon := &_SimpleDaemon{
 		DefaultDaemon: DefaultDaemon{
@@ -143,23 +143,23 @@ func TestSimpleDaemonWithNilFunctions(t *testing.T) {
 		StopFunc:  nil,
 	}
 	
-	// 測試 nil StartFunc（不應該 panic）
+	// Test nil StartFunc (should not panic)
 	simpleDaemon.Start()
 	
-	// 測試 nil StopFunc（不應該 panic）
+	// Test nil StopFunc (should not panic)
 	simpleDaemon.Stop(syscall.SIGTERM)
 	
-	// 其他方法仍應正常工作
+	// Other methods should still work
 	assert.Equal(t, "testSimpleNil", simpleDaemon.Name())
 	assert.Equal(t, StateWait, simpleDaemon.State())
 }
 
-// TestRegisterSimpleDaemonFunction 測試 RegisterSimpleDaemon 全局函數
+// TestRegisterSimpleDaemonFunction tests RegisterSimpleDaemon global function
 func TestRegisterSimpleDaemonFunction(t *testing.T) {
 	var startCalled, stopCalled bool
 	var stopSignal os.Signal
 	
-	// 註冊 SimpleDaemon
+	// Register SimpleDaemon
 	err := RegisterSimpleDaemon("globalSimple",
 		func() { startCalled = true },
 		func(sig os.Signal) {
@@ -168,31 +168,31 @@ func TestRegisterSimpleDaemonFunction(t *testing.T) {
 		})
 	require.NoError(t, err)
 	
-	// 檢查是否已註冊
+	// Check if registered
 	entity := GetDaemon("globalSimple")
 	require.NotNil(t, entity)
 	assert.Equal(t, "globalSimple", entity.Name)
 	
-	// 啟動整個服務（這會啟動所有已註冊的 daemon）
+	// Start entire service (this starts all registered daemons)
 	err = Start()
 	require.NoError(t, err)
 	assert.True(t, startCalled)
 	
-	// 停止整個服務
+	// Stop entire service
 	err = Stop(syscall.SIGKILL)
 	require.NoError(t, err)
 	assert.True(t, stopCalled)
 	assert.Equal(t, syscall.SIGKILL, stopSignal)
 }
 
-// TestSimpleDaemonIntegration 測試 SimpleDaemon 的集成功能
+// TestSimpleDaemonIntegration tests SimpleDaemon integration functionality
 func TestSimpleDaemonIntegration(t *testing.T) {
 	service := NewDaemonService()
 	
 	startCount := 0
 	stopCount := 0
 	
-	// 創建多個 SimpleDaemon
+	// Create multiple SimpleDaemons
 	for i := 0; i < 3; i++ {
 		name := fmt.Sprintf("integration_%d", i)
 		simpleDaemon := &_SimpleDaemon{
@@ -207,38 +207,38 @@ func TestSimpleDaemonIntegration(t *testing.T) {
 		require.NoError(t, err)
 	}
 	
-	// 啟動所有 daemon
+	// Start all daemons
 	err := service.Start()
 	require.NoError(t, err)
 	assert.Equal(t, 3, startCount)
 	
-	// 停止所有 daemon
+	// Stop all daemons
 	err = service.Stop(syscall.SIGTERM)
 	require.NoError(t, err)
 	assert.Equal(t, 3, stopCount)
 }
 
-// TestDefaultDaemonWithDaemonInterface 測試 DefaultDaemon 實現 Daemon 接口的完整性
+// TestDefaultDaemonWithDaemonInterface tests DefaultDaemon implements Daemon interface completely
 func TestDefaultDaemonWithDaemonInterface(t *testing.T) {
 	var daemon Daemon = &DefaultDaemon{
 		name: "interfaceTest",
 	}
 	
-	// 測試接口方法
+	// Test interface methods
 	assert.Equal(t, "interfaceTest", daemon.Name())
 	assert.Equal(t, StateWait, daemon.State())
 	
 	err := daemon.Registered()
 	assert.NoError(t, err)
 	
-	daemon.Start() // 不應該 panic
-	daemon.Stop(syscall.SIGTERM) // 不應該 panic
+	daemon.Start() // Should not panic
+	daemon.Stop(syscall.SIGTERM) // Should not panic
 	
 	statePtr := daemon._State()
 	assert.NotNil(t, statePtr)
 }
 
-// TestSimpleDaemonWithDaemonInterface 測試 SimpleDaemon 實現 Daemon 接口的完整性
+// TestSimpleDaemonWithDaemonInterface tests SimpleDaemon implements Daemon interface completely
 func TestSimpleDaemonWithDaemonInterface(t *testing.T) {
 	var called bool
 	
@@ -250,7 +250,7 @@ func TestSimpleDaemonWithDaemonInterface(t *testing.T) {
 		StopFunc:  func(sig os.Signal) { called = true },
 	}
 	
-	// 測試接口方法
+	// Test interface methods
 	assert.Equal(t, "interfaceSimpleTest", daemon.Name())
 	assert.Equal(t, StateWait, daemon.State())
 	
@@ -268,16 +268,16 @@ func TestSimpleDaemonWithDaemonInterface(t *testing.T) {
 	assert.NotNil(t, statePtr)
 }
 
-// TestDaemonSetNameInterface 測試 daemonSetName 接口
+// TestDaemonSetNameInterface tests daemonSetName interface
 func TestDaemonSetNameInterface(t *testing.T) {
-	// 測試 DefaultDaemon 實現 daemonSetName 接口
+	// Test DefaultDaemon implements daemonSetName interface
 	var setNameDaemon daemonSetName = &DefaultDaemon{}
 	setNameDaemon.setName("testSetName")
 	
 	daemon := setNameDaemon.(*DefaultDaemon)
 	assert.Equal(t, "testSetName", daemon.Name())
 	
-	// 測試 SimpleDaemon 也應該實現 daemonSetName 接口（通過嵌入 DefaultDaemon）
+	// Test SimpleDaemon also implements daemonSetName interface (through embedding DefaultDaemon)
 	var setNameSimple daemonSetName = &_SimpleDaemon{
 		DefaultDaemon: DefaultDaemon{},
 	}
