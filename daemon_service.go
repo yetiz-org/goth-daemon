@@ -22,7 +22,7 @@ type DaemonService struct {
 	// stop all daemon when get kill signal, default: `true`
 	StopWhenKill          bool
 	orderIndex            int
-	orderMutex            sync.Mutex // Protects orderIndex and usedOrders access
+	orderMutex            sync.Mutex     // Protects orderIndex and usedOrders access
 	usedOrders            map[int]string // Tracks used orders: order -> daemon name
 	sig                   chan os.Signal
 	stopFuture            concurrent.Future
@@ -116,6 +116,7 @@ func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
 // Order determines startup and shutdown sequence:
 //   - Lower order values start earlier (Start phase)
 //   - Higher order values stop earlier (Stop phase)
+//
 // This ensures dependencies are handled correctly: services that start first, stop last.
 //
 // Panics if the specified order is already used by another daemon.
@@ -338,6 +339,8 @@ func (s *DaemonService) StartDaemon(entity *DaemonEntity) kkpanic.Caught {
 			s.loopInvokerReload <- 1
 		}
 
+		// Mark daemon as successfully started
+		atomic.StoreInt32(&entity.started, 1)
 		kklogger.InfoJ("DaemonService.StartDaemon", fmt.Sprintf("entity %s started", entity.Name))
 	}).CatchAll(func(caught kkpanic.Caught) {
 		c = caught
@@ -473,8 +476,11 @@ func (s *DaemonService) Stop(sig os.Signal) error {
 	s.timerMutex.Unlock()
 
 	for _, entity := range el {
-		if c := s.StopDaemon(entity, sig); c != nil {
-			kklogger.ErrorJ("DaemonService.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, c.String()))
+		// Only stop daemons that were successfully started
+		if atomic.LoadInt32(&entity.started) == 1 {
+			if c := s.StopDaemon(entity, sig); c != nil {
+				kklogger.ErrorJ("DaemonService.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, c.String()))
+			}
 		}
 	}
 
@@ -482,7 +488,11 @@ func (s *DaemonService) Stop(sig os.Signal) error {
 }
 
 func (s *DaemonService) StopDaemon(entity *DaemonEntity, sig os.Signal) kkpanic.Caught {
-	defer func() { atomic.StoreInt32(entity.Daemon._State(), StateWait) }()
+	defer func() {
+		atomic.StoreInt32(entity.Daemon._State(), StateWait)
+		// Reset started flag after stopping
+		atomic.StoreInt32(&entity.started, 0)
+	}()
 	if !atomic.CompareAndSwapInt32(entity.Daemon._State(), StateStart, StateStop) &&
 		!atomic.CompareAndSwapInt32(entity.Daemon._State(), StateRun, StateStop) {
 		return kkpanic.Convert(fmt.Sprintf("%s not in START/RUN state", entity.Daemon.Name()))

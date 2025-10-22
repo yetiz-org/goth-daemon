@@ -29,6 +29,7 @@ type DaemonEntity struct {
 	Order     int
 	Next      time.Time
 	nextMutex sync.RWMutex // Protects Next field access
+	started   int32        // Atomic flag: 1 if daemon has been successfully started, 0 otherwise
 }
 
 type Daemon interface {

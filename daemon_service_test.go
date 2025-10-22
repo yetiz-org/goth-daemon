@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestDaemonServiceCreation 測試 DaemonService 的創建和初始化
+// TestDaemonServiceCreation tests the creation and initialization of DaemonService
 func TestDaemonServiceCreation(t *testing.T) {
 	service := NewDaemonService()
 	
-	// 檢查基本屬性
+	// Check basic properties
 	assert.True(t, service.StopWhenKill)
 	assert.NotNil(t, service.sig)
 	assert.NotNil(t, service.stopFuture)
@@ -27,42 +27,42 @@ func TestDaemonServiceCreation(t *testing.T) {
 	assert.Equal(t, int32(0), service.shutdownState)
 	assert.Equal(t, 0, service.orderIndex)
 	
-	// 檢查初始狀態
+	// Check initial state
 	assert.False(t, service.IsShutdown())
 }
 
-// TestDaemonServiceRegisterAndUnregister 測試註冊和取消註冊功能
+// TestDaemonServiceRegisterAndUnregister tests the register and unregister functionality
 func TestDaemonServiceRegisterAndUnregister(t *testing.T) {
 	service := NewDaemonService()
 	daemon := &testServiceDaemon{}
 	
-	// 測試註冊
+	// Test registration
 	err := service.RegisterDaemon(daemon)
 	require.NoError(t, err)
 	
-	// 檢查註冊結果
+	// Check registration result
 	entity := service.GetDaemon(daemon.Name())
 	require.NotNil(t, entity)
 	assert.Equal(t, daemon.Name(), entity.Name)
 	assert.Equal(t, 1, entity.Order)
 	assert.Equal(t, StateWait, daemon.State())
 	
-	// 啟動 daemon 後再取消註冊（只有運行中的 daemon 才能被正確停止）
+	// Start daemon then unregister (only running daemons can be properly stopped)
 	err = service.StartDaemon(entity)
 	require.NoError(t, err)
 	assert.Equal(t, StateStart, daemon.State())
 	
-	// 測試取消註冊
+	// Test unregister
 	err = service.UnregisterDaemon(daemon.Name())
 	require.NoError(t, err)
 	
-	// 檢查取消註冊結果
+	// Check unregister result
 	entity = service.GetDaemon(daemon.Name())
 	assert.Nil(t, entity)
 	assert.True(t, daemon.stopCalled)
 }
 
-// TestDaemonServiceStartStop 測試服務的啟動和停止
+// TestDaemonServiceStartStop tests the start and stop of the service
 func TestDaemonServiceStartStop(t *testing.T) {
 	service := NewDaemonService()
 	daemon := &testServiceDaemon{}
@@ -70,18 +70,18 @@ func TestDaemonServiceStartStop(t *testing.T) {
 	err := service.RegisterDaemon(daemon)
 	require.NoError(t, err)
 	
-	// 測試啟動服務
+	// Test start service
 	err = service.Start()
 	require.NoError(t, err)
 	assert.Equal(t, StateStart, daemon.State())
 	assert.True(t, daemon.startCalled)
 	
-	// 測試重複啟動（應該失敗）
+	// Test repeated start (should fail)
 	err = service.Start()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not in WAIT state")
 	
-	// 測試停止服務
+	// Test stop service
 	err = service.Stop(syscall.SIGTERM)
 	require.NoError(t, err)
 	assert.Equal(t, StateWait, daemon.State())
@@ -89,7 +89,7 @@ func TestDaemonServiceStartStop(t *testing.T) {
 	assert.Equal(t, syscall.SIGTERM, daemon.stopSignal)
 }
 
-// TestDaemonServiceStartStopIndividualDaemon 測試單個 daemon 的啟動和停止
+// TestDaemonServiceStartStopIndividualDaemon tests the start and stop of individual daemon
 func TestDaemonServiceStartStopIndividualDaemon(t *testing.T) {
 	service := NewDaemonService()
 	daemon := &testServiceDaemon{}
@@ -100,17 +100,17 @@ func TestDaemonServiceStartStopIndividualDaemon(t *testing.T) {
 	entity := service.GetDaemon(daemon.Name())
 	require.NotNil(t, entity)
 	
-	// 測試啟動單個 daemon
+	// Test start individual daemon
 	err2 := service.StartDaemon(entity)
 	require.NoError(t, err2)
 	assert.Equal(t, StateStart, daemon.State())
 	assert.True(t, daemon.startCalled)
 	
-	// 測試重複啟動（應該失敗）
+	// Test repeated start (should fail)
 	err2 = service.StartDaemon(entity)
 	require.Error(t, err2)
 	
-	// 測試停止單個 daemon
+	// Test stop individual daemon
 	err3 := service.StopDaemon(entity, syscall.SIGINT)
 	require.NoError(t, err3)
 	assert.Equal(t, StateWait, daemon.State())
@@ -118,7 +118,7 @@ func TestDaemonServiceStartStopIndividualDaemon(t *testing.T) {
 	assert.Equal(t, syscall.SIGINT, daemon.stopSignal)
 }
 
-// TestDaemonServiceSignalHandling 測試信號處理機制
+// TestDaemonServiceSignalHandling tests the signal handling mechanism
 func TestDaemonServiceSignalHandling(t *testing.T) {
 	service := NewDaemonService()
 	daemon := &testServiceDaemon{}
@@ -129,13 +129,13 @@ func TestDaemonServiceSignalHandling(t *testing.T) {
 	err = service.Start()
 	require.NoError(t, err)
 	
-	// 測試優雅關閉信號
+	// Test graceful shutdown signal
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		service.ShutdownGracefully()
 	}()
 	
-	// 等待關閉完成
+	// Wait for shutdown to complete
 	select {
 	case <-service.ShutdownFuture().Done():
 		assert.True(t, service.IsShutdown())
@@ -145,7 +145,7 @@ func TestDaemonServiceSignalHandling(t *testing.T) {
 	}
 }
 
-// TestDaemonServiceStopWhenKillFlag 測試 StopWhenKill 標誌的行為
+// TestDaemonServiceStopWhenKillFlag tests the behavior of StopWhenKill flag
 func TestDaemonServiceStopWhenKillFlag(t *testing.T) {
 	service := NewDaemonService()
 	service.StopWhenKill = false
@@ -157,23 +157,23 @@ func TestDaemonServiceStopWhenKillFlag(t *testing.T) {
 	err = service.Start()
 	require.NoError(t, err)
 	
-	// 當 StopWhenKill 為 false 時，發送 SIGTERM 不應該停止 daemon
+	// When StopWhenKill is false, sending SIGTERM should not stop daemon
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		service.sig <- syscall.SIGTERM
 	}()
 	
-	// 等待信號處理完成
+	// Wait for signal handling to complete
 	select {
 	case <-service.ShutdownFuture().Done():
 		assert.True(t, service.IsShutdown())
-		assert.False(t, daemon.stopCalled) // daemon 不應該被停止
+		assert.False(t, daemon.stopCalled) // daemon should not be stopped
 	case <-time.After(2 * time.Second):
 		t.Fatal("Signal handling timeout")
 	}
 }
 
-// TestDaemonServicePanicRecovery 測試 panic 恢復機制
+// TestDaemonServicePanicRecovery tests the panic recovery mechanism
 func TestDaemonServicePanicRecovery(t *testing.T) {
 	service := NewDaemonService()
 	daemon := &panicDaemon{}
@@ -184,15 +184,15 @@ func TestDaemonServicePanicRecovery(t *testing.T) {
 	entity := service.GetDaemon(daemon.Name())
 	require.NotNil(t, entity)
 	
-	// 啟動會引發 panic 的 daemon
+	// Start daemon that will cause panic
 	err2 := service.StartDaemon(entity)
-	require.Error(t, err2) // 應該捕獲到 panic
+	require.Error(t, err2) // should catch panic
 	
-	// daemon 狀態應該被恢復到 StateStart
+	// Daemon state should be restored to StateStart
 	assert.Equal(t, StateStart, daemon.State())
 }
 
-// TestDaemonServiceLoopInvoker 測試循環調用器功能
+// TestDaemonServiceLoopInvoker tests the loop invoker functionality
 func TestDaemonServiceLoopInvoker(t *testing.T) {
 	service := NewDaemonService()
 	timerDaemon := &testTimerLoopDaemon{}
@@ -203,27 +203,27 @@ func TestDaemonServiceLoopInvoker(t *testing.T) {
 	err = service.Start()
 	require.NoError(t, err)
 	
-	// 等待幾次循環執行
+	// Wait for several loop executions
 	time.Sleep(250 * time.Millisecond)
 	
-	// 檢查 Loop 方法是否被調用
+	// Check if Loop method was called
 	assert.True(t, atomic.LoadInt32(&timerDaemon.loopCount) > 0)
 	
 	err = service.Stop(syscall.SIGTERM)
 	require.NoError(t, err)
 }
 
-// TestDaemonServiceConcurrentOperations 測試 DaemonService 的併發安全性
+// TestDaemonServiceConcurrentOperations tests the concurrency safety of DaemonService
 func TestDaemonServiceConcurrentOperations(t *testing.T) {
 	service := NewDaemonService()
 	var wg sync.WaitGroup
 	errors := make(chan error, 20)
 	
-	// 併發註冊和取消註冊操作
+	// Concurrent register and unregister operations
 	for i := 0; i < 10; i++ {
 		wg.Add(2)
 		
-		// 註冊 daemon
+		// Register daemon
 		go func(index int) {
 			defer wg.Done()
 			daemon := &testServiceDaemon{name: fmt.Sprintf("concurrent_service_%d", index)}
@@ -232,10 +232,10 @@ func TestDaemonServiceConcurrentOperations(t *testing.T) {
 			}
 		}(i)
 		
-		// 嘗試取消註冊
+		// Attempt to unregister
 		go func(index int) {
 			defer wg.Done()
-			time.Sleep(50 * time.Millisecond) // 稍微延遲以增加競爭條件
+			time.Sleep(50 * time.Millisecond) // slightly delay to increase race condition
 			if err := service.UnregisterDaemon(fmt.Sprintf("concurrent_service_%d", index)); err != nil {
 				errors <- err
 			}
@@ -245,7 +245,7 @@ func TestDaemonServiceConcurrentOperations(t *testing.T) {
 	wg.Wait()
 	close(errors)
 	
-	// 檢查錯誤（一些錯誤是預期的，比如試圖取消註冊不存在的 daemon）
+	// Check errors (some errors are expected, like trying to unregister non-existent daemon)
 	errorCount := 0
 	for err := range errors {
 		if err != nil {
@@ -253,11 +253,11 @@ func TestDaemonServiceConcurrentOperations(t *testing.T) {
 		}
 	}
 	
-	// 由於併發操作，可能會有一些錯誤，但不應該有太多
+	// Due to concurrent operations, there may be some errors, but not too many
 	assert.True(t, errorCount <= 10, "Too many errors in concurrent operations")
 }
 
-// testServiceDaemon 用於測試 DaemonService 的測試 daemon
+// testServiceDaemon is a test daemon for testing DaemonService
 type testServiceDaemon struct {
 	DefaultDaemon
 	name        string
@@ -282,7 +282,7 @@ func (d *testServiceDaemon) Stop(sig os.Signal) {
 	d.stopSignal = sig
 }
 
-// panicDaemon 用於測試 panic 恢復的 daemon
+// panicDaemon is a daemon for testing panic recovery
 type panicDaemon struct {
 	DefaultDaemon
 }
@@ -292,17 +292,17 @@ func (d *panicDaemon) Start() {
 }
 
 func (d *panicDaemon) Stop(sig os.Signal) {
-	// 空實現
+	// Empty implementation
 }
 
-// testTimerLoopDaemon 用於測試循環調用器的定時器 daemon
+// testTimerLoopDaemon is a timer daemon for testing loop invoker
 type testTimerLoopDaemon struct {
 	DefaultTimerDaemon
 	loopCount int32
 }
 
 func (d *testTimerLoopDaemon) Interval() time.Duration {
-	return 50 * time.Millisecond // 短間隔用於測試
+	return 50 * time.Millisecond // Short interval for testing
 }
 
 func (d *testTimerLoopDaemon) Loop() error {
@@ -311,9 +311,82 @@ func (d *testTimerLoopDaemon) Loop() error {
 }
 
 func (d *testTimerLoopDaemon) Start() {
-	// 空實現
+	// Empty implementation
 }
 
 func (d *testTimerLoopDaemon) Stop(sig os.Signal) {
-	// 空實現
+	// Empty implementation
+}
+
+// TestDaemonServicePartialStartupFailure tests shutdown behavior when partial startup failure occurs
+// Scenario: There are 6 daemons (1,2,3,4,5,6), the 3rd one fails to start
+// Expected: Only daemons 1 and 2 will be stopped, 3,4,5,6 will not be stopped
+func TestDaemonServicePartialStartupFailure(t *testing.T) {
+	service := NewDaemonService()
+	
+	// Create 6 daemons, the 3rd one will panic on start
+	daemons := make([]*trackingDaemon, 6)
+	for i := 0; i < 6; i++ {
+		shouldPanic := (i == 2) // The 3rd daemon (index 2) will panic
+		daemons[i] = &trackingDaemon{
+			name:        fmt.Sprintf("daemon_%d", i+1),
+			shouldPanic: shouldPanic,
+		}
+		err := service.RegisterDaemonWithOrder(daemons[i], i+1)
+		require.NoError(t, err)
+	}
+	
+	// Try to start all daemons, should fail at the 3rd one
+	err := service.Start()
+	require.Error(t, err, "Start should fail when daemon 3 panics")
+	assert.Contains(t, err.Error(), "panic in start")
+	
+	// Verify startup status: only the first 2 should start successfully
+	assert.True(t, daemons[0].startCalled, "daemon 1 should be started")
+	assert.True(t, daemons[1].startCalled, "daemon 2 should be started")
+	assert.True(t, daemons[2].startCalled, "daemon 3 should attempt to start (but panic)")
+	assert.False(t, daemons[3].startCalled, "daemon 4 should not be started")
+	assert.False(t, daemons[4].startCalled, "daemon 5 should not be started")
+	assert.False(t, daemons[5].startCalled, "daemon 6 should not be started")
+	
+	// Call ShutdownGracefully to clean up
+	service.ShutdownGracefully()
+	
+	// Wait for shutdown to complete
+	select {
+	case <-service.ShutdownFuture().Done():
+		// Verify stop status: only successfully started daemons (1, 2) should be stopped
+		assert.True(t, daemons[0].stopCalled, "daemon 1 should be stopped")
+		assert.True(t, daemons[1].stopCalled, "daemon 2 should be stopped")
+		assert.False(t, daemons[2].stopCalled, "daemon 3 should not be stopped (never fully started)")
+		assert.False(t, daemons[3].stopCalled, "daemon 4 should not be stopped (never started)")
+		assert.False(t, daemons[4].stopCalled, "daemon 5 should not be stopped (never started)")
+		assert.False(t, daemons[5].stopCalled, "daemon 6 should not be stopped (never started)")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shutdown timeout")
+	}
+}
+
+// trackingDaemon is a test daemon for tracking start and stop calls
+type trackingDaemon struct {
+	DefaultDaemon
+	name        string
+	shouldPanic bool
+	startCalled bool
+	stopCalled  bool
+}
+
+func (d *trackingDaemon) Name() string {
+	return d.name
+}
+
+func (d *trackingDaemon) Start() {
+	d.startCalled = true
+	if d.shouldPanic {
+		panic("panic in start")
+	}
+}
+
+func (d *trackingDaemon) Stop(sig os.Signal) {
+	d.stopCalled = true
 }
