@@ -384,7 +384,7 @@ func TestRegisterDaemonWithOrder_RealWorldScenario(t *testing.T) {
 	require.NoError(t, err)
 	err = service.RegisterDaemonWithOrder(database, 10)
 	require.NoError(t, err)
-	
+
 	// Test that same order panics
 	assert.Panics(t, func() {
 		service.RegisterDaemonWithOrder(cache, 10) // Same order should panic

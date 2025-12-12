@@ -25,6 +25,8 @@ type DaemonService struct {
 	orderMutex            sync.Mutex     // Protects orderIndex and usedOrders access
 	usedOrders            map[int]string // Tracks used orders: order -> daemon name
 	sig                   chan os.Signal
+	signalMutex           sync.Mutex
+	signalStopCh          chan struct{}
 	stopFuture            concurrent.Future
 	shutdownFuture        concurrent.Future
 	loopInvokerReload     chan int
@@ -47,15 +49,12 @@ type DaemonService struct {
 func NewDaemonService() *DaemonService {
 	ds := &DaemonService{
 		StopWhenKill:      true,
-		sig:               make(chan os.Signal),
+		sig:               make(chan os.Signal, 1),
 		stopFuture:        concurrent.NewFuture(),
 		shutdownFuture:    concurrent.NewFuture(),
 		loopInvokerReload: make(chan int),
 		usedOrders:        make(map[int]string),
 	}
-
-	signal.Notify(ds.sig, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGKILL, syscall.SIGTERM, syscall.SIGHUP)
-	go ds.judgeStopWhenKill()
 	return ds
 }
 
@@ -74,9 +73,9 @@ func (s *DaemonService) invalidateDaemonCache() {
 	s.allDaemonCacheMutex.Unlock()
 }
 
-func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
+func (s *DaemonService) resolveDaemonName(daemon Daemon) (string, error) {
 	if daemon == nil {
-		return fmt.Errorf("nil daemon")
+		return "", fmt.Errorf("nil daemon")
 	}
 
 	name := daemon.Name()
@@ -85,7 +84,7 @@ func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
 	}
 
 	if name == "" {
-		return fmt.Errorf("name is empty")
+		return "", fmt.Errorf("name is empty")
 	}
 
 	if daemon.Name() != name {
@@ -94,19 +93,39 @@ func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
 		}
 	}
 
-	if v, loaded := s.DaemonMap.LoadOrStore(name, &DaemonEntity{Name: name, Daemon: daemon}); loaded {
-		return fmt.Errorf("name is exist")
-	} else {
-		s.orderMutex.Lock()
-		s.orderIndex++
-		order := s.orderIndex
-		s.usedOrders[order] = name // Track auto-assigned order
-		s.orderMutex.Unlock()
+	return name, nil
+}
 
-		v.(*DaemonEntity).Order = order
-		// Daemon registered successfully, invalidate cache
-		s.invalidateDaemonCache()
+func (s *DaemonService) cloneDaemonEntities(src []*DaemonEntity) []*DaemonEntity {
+	if src == nil {
+		return nil
 	}
+
+	dst := make([]*DaemonEntity, len(src))
+	copy(dst, src)
+	return dst
+}
+
+func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
+	name, err := s.resolveDaemonName(daemon)
+	if err != nil {
+		return err
+	}
+
+	entity := &DaemonEntity{Name: name, Daemon: daemon}
+	if _, loaded := s.DaemonMap.LoadOrStore(name, entity); loaded {
+		return fmt.Errorf("name is exist")
+	}
+
+	s.orderMutex.Lock()
+	s.orderIndex++
+	order := s.orderIndex
+	s.usedOrders[order] = name // Track auto-assigned order
+	s.orderMutex.Unlock()
+
+	entity.Order = order
+	// Daemon registered successfully, invalidate cache
+	s.invalidateDaemonCache()
 
 	atomic.StoreInt32(daemon._State(), StateWait)
 	return daemon.Registered()
@@ -121,23 +140,9 @@ func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
 //
 // Panics if the specified order is already used by another daemon.
 func (s *DaemonService) RegisterDaemonWithOrder(daemon Daemon, order int) error {
-	if daemon == nil {
-		return fmt.Errorf("nil daemon")
-	}
-
-	name := daemon.Name()
-	if name == "" {
-		name = reflect.TypeOf(daemon).Elem().Name()
-	}
-
-	if name == "" {
-		return fmt.Errorf("name is empty")
-	}
-
-	if daemon.Name() != name {
-		if cast, ok := daemon.(daemonSetName); ok {
-			cast.setName(name)
-		}
+	name, err := s.resolveDaemonName(daemon)
+	if err != nil {
+		return err
 	}
 
 	// Check for order conflict
@@ -177,10 +182,8 @@ func (s *DaemonService) GetDaemon(name string) *DaemonEntity {
 func (s *DaemonService) getAllDaemonEntitySlice() []*DaemonEntity {
 	// First try to use cache
 	s.allDaemonCacheMutex.RLock()
-	if s.allDaemonCacheValid && s.allDaemonCache != nil {
-		// Create cache copy to avoid concurrent modifications
-		result := make([]*DaemonEntity, len(s.allDaemonCache))
-		copy(result, s.allDaemonCache)
+	if s.allDaemonCacheValid {
+		result := s.cloneDaemonEntities(s.allDaemonCache)
 		s.allDaemonCacheMutex.RUnlock()
 		return result
 	}
@@ -191,15 +194,13 @@ func (s *DaemonService) getAllDaemonEntitySlice() []*DaemonEntity {
 	defer s.allDaemonCacheMutex.Unlock()
 
 	// Double check to avoid multiple goroutines rebuilding cache simultaneously
-	if s.allDaemonCacheValid && s.allDaemonCache != nil {
-		result := make([]*DaemonEntity, len(s.allDaemonCache))
-		copy(result, s.allDaemonCache)
-		return result
+	if s.allDaemonCacheValid {
+		return s.cloneDaemonEntities(s.allDaemonCache)
 	}
 
 	// Rebuild cache
 	var el []*DaemonEntity
-	s.DaemonMap.Range(func(key, value interface{}) bool {
+	s.DaemonMap.Range(func(_, value interface{}) bool {
 		el = append(el, value.(*DaemonEntity))
 		return true
 	})
@@ -209,9 +210,7 @@ func (s *DaemonService) getAllDaemonEntitySlice() []*DaemonEntity {
 	s.allDaemonCacheValid = true
 
 	// Return cache copy
-	result := make([]*DaemonEntity, len(el))
-	copy(result, el)
-	return result
+	return s.cloneDaemonEntities(el)
 }
 
 func (s *DaemonService) UnregisterDaemon(name string) error {
@@ -254,10 +253,8 @@ func (s *DaemonService) entitySetNext(entity *DaemonEntity) {
 func (s *DaemonService) getOrderedDaemonEntitySlice() []*DaemonEntity {
 	// First try to use cache
 	s.daemonCacheMutex.RLock()
-	if s.daemonCacheValid && s.daemonEntityCache != nil {
-		// Create cache copy to avoid concurrent modifications
-		result := make([]*DaemonEntity, len(s.daemonEntityCache))
-		copy(result, s.daemonEntityCache)
+	if s.daemonCacheValid {
+		result := s.cloneDaemonEntities(s.daemonEntityCache)
 		s.daemonCacheMutex.RUnlock()
 		return result
 	}
@@ -268,15 +265,13 @@ func (s *DaemonService) getOrderedDaemonEntitySlice() []*DaemonEntity {
 	defer s.daemonCacheMutex.Unlock()
 
 	// Double check to avoid multiple goroutines rebuilding cache simultaneously
-	if s.daemonCacheValid && s.daemonEntityCache != nil {
-		result := make([]*DaemonEntity, len(s.daemonEntityCache))
-		copy(result, s.daemonEntityCache)
-		return result
+	if s.daemonCacheValid {
+		return s.cloneDaemonEntities(s.daemonEntityCache)
 	}
 
 	// Rebuild cache
 	var el []*DaemonEntity
-	s.DaemonMap.Range(func(key, value interface{}) bool {
+	s.DaemonMap.Range(func(_, value interface{}) bool {
 		switch value.(*DaemonEntity).Daemon.(type) {
 		case TimerDaemon, SchedulerDaemon:
 			el = append(el, value.(*DaemonEntity))
@@ -298,15 +293,15 @@ func (s *DaemonService) getOrderedDaemonEntitySlice() []*DaemonEntity {
 	s.daemonCacheValid = true
 
 	// Return cache copy
-	result := make([]*DaemonEntity, len(el))
-	copy(result, el)
-	return result
+	return s.cloneDaemonEntities(el)
 }
 
 func (s *DaemonService) Start() error {
 	if !atomic.CompareAndSwapInt32(&s.state, StateWait, StateStart) {
 		return kkpanic.Convert("DaemonService not in WAIT state")
 	}
+
+	s.startSignalHandling()
 
 	// Use cache to get all daemons
 	el := s.getAllDaemonEntitySlice()
@@ -358,15 +353,21 @@ func (s *DaemonService) _LoopInvoker() {
 	s.invokeLoopDaemonTimer.Stop()
 	s.timerMutex.Unlock()
 
-	go func(s *DaemonService) {
+	go func() {
 		for {
 			now := time.Now()
 			next := _MaxTime
 			needsCacheInvalidation := false
 
+			updateNext := func(t time.Time) {
+				if next.After(t) {
+					next = t
+				}
+			}
+
 			for _, entity := range s.getOrderedDaemonEntitySlice() {
-				now = time.Now()
-				if entity.Next.Before(now) || entity.Next.Equal(now) {
+				isDue := !entity.Next.After(now)
+				if isDue {
 					if atomic.CompareAndSwapInt32(entity.Daemon._State(), StateStart, StateRun) {
 						// Set next execution time immediately before starting goroutine
 						s.entitySetNext(entity)
@@ -391,14 +392,10 @@ func (s *DaemonService) _LoopInvoker() {
 							}
 						}(entity)
 					}
+				}
 
-					if next.After(entity.Next) {
-						next = entity.Next
-					}
-				} else {
-					if next.After(entity.Next) {
-						next = entity.Next
-					}
+				updateNext(entity.Next)
+				if !isDue {
 					break
 				}
 			}
@@ -442,7 +439,7 @@ func (s *DaemonService) _LoopInvoker() {
 				return
 			}
 		}
-	}(s)
+	}()
 }
 
 func (s *DaemonService) Stop(sig os.Signal) error {
@@ -450,12 +447,14 @@ func (s *DaemonService) Stop(sig os.Signal) error {
 		return kkpanic.Convert("DaemonService not in START state")
 	}
 
-	defer func(s *DaemonService) {
+	s.stopSignalHandling()
+
+	defer func() {
 		s.timerMutex.Lock()
 		s.stopFuture = concurrent.NewFuture()
 		s.timerMutex.Unlock()
 		atomic.StoreInt32(&s.state, StateWait)
-	}(s)
+	}()
 
 	s.timerMutex.Lock()
 	s.stopFuture.Completable().Complete(nil)
@@ -511,12 +510,22 @@ func (s *DaemonService) StopDaemon(entity *DaemonEntity, sig os.Signal) kkpanic.
 }
 
 func (s *DaemonService) IsShutdown() bool {
-	return s.shutdownState == 1
+	return atomic.LoadInt32(&s.shutdownState) == 1
 }
 
 func (s *DaemonService) ShutdownGracefully() {
-	if atomic.CompareAndSwapInt32(&s.shutdownState, 0, 1) {
-		s.sig <- shutdownGracefullySignal
+	if !atomic.CompareAndSwapInt32(&s.shutdownState, 0, 1) {
+		return
+	}
+
+	if atomic.LoadInt32(&s.state) != StateStart {
+		s.shutdownFuture.Completable().Complete(shutdownGracefullySignal)
+		return
+	}
+
+	select {
+	case s.sig <- shutdownGracefullySignal:
+	default:
 	}
 }
 
@@ -524,9 +533,57 @@ func (s *DaemonService) ShutdownFuture() concurrent.Future {
 	return s.shutdownFuture
 }
 
-func (s *DaemonService) judgeStopWhenKill() {
-	go func(s *DaemonService) {
-		sig := <-s.sig
+
+func (s *DaemonService) startSignalHandling() {
+	s.signalMutex.Lock()
+	defer s.signalMutex.Unlock()
+
+	if s.signalStopCh != nil {
+		return
+	}
+
+	drainStart:
+	for {
+		select {
+		case <-s.sig:
+			continue
+		default:
+			break drainStart
+		}
+	}
+
+	s.signalStopCh = make(chan struct{})
+	signal.Notify(s.sig, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGHUP)
+	go s.judgeStopWhenKill(s.signalStopCh)
+}
+
+func (s *DaemonService) stopSignalHandling() {
+	s.signalMutex.Lock()
+	stopCh := s.signalStopCh
+	if stopCh == nil {
+		s.signalMutex.Unlock()
+		return
+	}
+	s.signalStopCh = nil
+	signal.Stop(s.sig)
+	close(stopCh)
+
+	drainStop:
+	for {
+		select {
+		case <-s.sig:
+			continue
+		default:
+			break drainStop
+		}
+	}
+	
+	s.signalMutex.Unlock()
+}
+
+func (s *DaemonService) judgeStopWhenKill(stopCh <-chan struct{}) {
+	select {
+	case sig := <-s.sig:
 		atomic.StoreInt32(&s.shutdownState, 1)
 		if !s.StopWhenKill && sig != shutdownGracefullySignal {
 			s.shutdownFuture.Completable().Complete(sig)
@@ -534,8 +591,10 @@ func (s *DaemonService) judgeStopWhenKill() {
 		}
 
 		kklogger.InfoJ("DaemonService:judgeStopWhenKill", fmt.Sprintf("SIGNAL: %s, SHUTDOWN CATCH", sig.String()))
-		s.Stop(sig)
+		_ = s.Stop(sig)
 		kklogger.InfoJ("DaemonService:judgeStopWhenKill", "Done")
 		s.shutdownFuture.Completable().Complete(sig)
-	}(s)
+	case <-stopCh:
+		return
+	}
 }
