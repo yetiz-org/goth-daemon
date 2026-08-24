@@ -28,8 +28,9 @@ type DaemonEntity struct {
 	Daemon    Daemon
 	Order     int
 	Next      time.Time
-	nextMutex sync.RWMutex // Protects Next field access
-	started   int32        // Atomic flag: 1 if daemon has been successfully started, 0 otherwise
+	nextMutex sync.RWMutex    // Protects Next field access
+	started   int32           // Atomic flag: 1 if daemon has been successfully started, 0 otherwise
+	lifecycle daemonLifecycle // Sole owner of the start/stop ownership decisions for this daemon
 }
 
 type Daemon interface {
@@ -51,11 +52,11 @@ type DefaultDaemon struct {
 	Params map[string]interface{}
 }
 
-func (d *DefaultDaemon) Registered() error {
+func (d *DefaultDaemon) Registered() (rtErr error) {
 	return nil
 }
 
-func (d *DefaultDaemon) State() int32 {
+func (d *DefaultDaemon) State() (state int32) {
 	return atomic.LoadInt32(&d.state)
 }
 
@@ -71,11 +72,11 @@ func (d *DefaultDaemon) setName(name string) {
 	d.name = name
 }
 
-func (d *DefaultDaemon) Name() string {
+func (d *DefaultDaemon) Name() (name string) {
 	return d.name
 }
 
-func (d *DefaultDaemon) _State() *int32 {
+func (d *DefaultDaemon) _State() (state *int32) {
 	return &d.state
 }
 
@@ -85,7 +86,7 @@ type _SimpleDaemon struct {
 	StopFunc  func(sig os.Signal)
 }
 
-func (s *_SimpleDaemon) Name() string {
+func (s *_SimpleDaemon) Name() (name string) {
 	return s.name
 }
 
@@ -101,15 +102,15 @@ func (s *_SimpleDaemon) Stop(sig os.Signal) {
 	}
 }
 
-func RegisterDaemon(daemon Daemon) error {
+func RegisterDaemon(daemon Daemon) (rtErr error) {
 	return DefaultService.RegisterDaemon(daemon)
 }
 
-func RegisterDaemonWithOrder(daemon Daemon, order int) error {
+func RegisterDaemonWithOrder(daemon Daemon, order int) (rtErr error) {
 	return DefaultService.RegisterDaemonWithOrder(daemon, order)
 }
 
-func RegisterSimpleDaemon(name string, startFunc func(), stopFunc func(sig os.Signal)) error {
+func RegisterSimpleDaemon(name string, startFunc func(), stopFunc func(sig os.Signal)) (rtErr error) {
 	return RegisterDaemon(&_SimpleDaemon{
 		DefaultDaemon: DefaultDaemon{
 			name: name,
@@ -119,7 +120,7 @@ func RegisterSimpleDaemon(name string, startFunc func(), stopFunc func(sig os.Si
 	})
 }
 
-func StartDaemon(name string) error {
+func StartDaemon(name string) (rtErr error) {
 	if entity, f := DefaultService.DaemonMap.Load(name); !f {
 		return fmt.Errorf(fmt.Sprintf("dameon %s not found", name))
 	} else {
@@ -127,7 +128,7 @@ func StartDaemon(name string) error {
 	}
 }
 
-func StopDaemon(name string, sig os.Signal) error {
+func StopDaemon(name string, sig os.Signal) (rtErr error) {
 	if entity, f := DefaultService.DaemonMap.Load(name); !f {
 		return fmt.Errorf(fmt.Sprintf("dameon %s not found", name))
 	} else {
@@ -135,23 +136,23 @@ func StopDaemon(name string, sig os.Signal) error {
 	}
 }
 
-func GetDaemon(name string) *DaemonEntity {
+func GetDaemon(name string) (entity *DaemonEntity) {
 	return DefaultService.GetDaemon(name)
 }
 
-func UnregisterDaemon(name string) error {
+func UnregisterDaemon(name string) (rtErr error) {
 	return DefaultService.UnregisterDaemon(name)
 }
 
-func Start() error {
+func Start() (rtErr error) {
 	return DefaultService.Start()
 }
 
-func Stop(sig os.Signal) error {
+func Stop(sig os.Signal) (rtErr error) {
 	return DefaultService.Stop(sig)
 }
 
-func IsShutdown() bool {
+func IsShutdown() (shutdown bool) {
 	return DefaultService.IsShutdown()
 }
 
@@ -159,7 +160,7 @@ func ShutdownGracefully() {
 	DefaultService.ShutdownGracefully()
 }
 
-func ShutdownFuture() concurrent.Future {
+func ShutdownFuture() (future concurrent.Future) {
 	return DefaultService.ShutdownFuture()
 }
 

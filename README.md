@@ -154,3 +154,54 @@ func (d *SchedulerDaemonExample) Stop(sig os.Signal) {
 }
 
 ```
+
+## Cancellable Startup - ContextStarter
+
+`Start()` cannot be interrupted. During service-wide shutdown, a blocking legacy start
+is not stopped concurrently and does not delay the other daemons; its cleanup is deferred
+until `Start` returns successfully. A daemon that needs cooperative cancellation during
+startup can implement the optional `ContextStarter` interface in addition to `Daemon`:
+
+```go
+type ContextStarter interface {
+    StartContext(ctx context.Context) error
+}
+```
+
+When a daemon implements it, the service calls `StartContext` instead of `Start` and owns
+the context of that single start invocation.
+
+```go
+type ServerDaemonExample struct {
+    kkdaemon.DefaultDaemon
+    listener net.Listener
+}
+
+func (d *ServerDaemonExample) StartContext(ctx context.Context) error {
+    // Perform blocking startup work that honors ctx.Done().
+    listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", ":8080")
+    if err != nil {
+        return err
+    }
+
+    d.listener = listener
+    return nil
+}
+
+func (d *ServerDaemonExample) Stop(sig os.Signal) {
+    d.listener.Close()
+}
+```
+
+**Contract:**
+- The context is cancelled when the service stops the daemon, and `Stop` waits for
+  `StartContext` to return. It carries cancellation only and is never used to pass state.
+- Returning `nil` means startup succeeded, even when the context was already cancelled.
+  The service then still calls `Stop` exactly once.
+- Returning an error (including `ctx.Err()`) or panicking means startup failed, so `Stop`
+  is not called. Existing failed-start state semantics remain unchanged.
+- `Start` and `StartContext` are never both called for the same start. Existing daemons
+  that only implement `Daemon` require no source changes and continue to use `Start`.
+- A daemon that only implements `Daemon` cannot be cancelled. Service-wide `Stop` does not
+  wait for a blocking `Start` and calls `Stop` once after `Start` returns. Direct
+  `StopDaemon` and `UnregisterDaemon` wait for that deferred cleanup before returning.

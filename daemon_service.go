@@ -35,6 +35,10 @@ type DaemonService struct {
 	invokeLoopDaemonTimer *time.Timer
 	timerMutex            sync.Mutex // Protects invokeLoopDaemonTimer and stopFuture access
 
+	// Start admission fields
+	startAdmissionMutex sync.Mutex // Serializes daemon admission against the shutdown scan
+	startEpoch          int64      // Identifies the running Start; Stop invalidates it to abort admission
+
 	// Slice cache optimization fields
 	daemonEntityCache []*DaemonEntity // Cache sorted daemon entity slice (includes only TimerDaemon and SchedulerDaemon)
 	daemonCacheMutex  sync.RWMutex    // RW lock for cache protection
@@ -46,7 +50,7 @@ type DaemonService struct {
 	allDaemonCacheValid bool            // Whether all daemon cache is valid
 }
 
-func NewDaemonService() *DaemonService {
+func NewDaemonService() (service *DaemonService) {
 	ds := &DaemonService{
 		StopWhenKill:      true,
 		sig:               make(chan os.Signal, 1),
@@ -73,12 +77,12 @@ func (s *DaemonService) invalidateDaemonCache() {
 	s.allDaemonCacheMutex.Unlock()
 }
 
-func (s *DaemonService) resolveDaemonName(daemon Daemon) (string, error) {
+func (s *DaemonService) resolveDaemonName(daemon Daemon) (name string, rtErr error) {
 	if daemon == nil {
 		return "", fmt.Errorf("nil daemon")
 	}
 
-	name := daemon.Name()
+	name = daemon.Name()
 	if name == "" {
 		name = reflect.TypeOf(daemon).Elem().Name()
 	}
@@ -96,17 +100,17 @@ func (s *DaemonService) resolveDaemonName(daemon Daemon) (string, error) {
 	return name, nil
 }
 
-func (s *DaemonService) cloneDaemonEntities(src []*DaemonEntity) []*DaemonEntity {
+func (s *DaemonService) cloneDaemonEntities(src []*DaemonEntity) (dst []*DaemonEntity) {
 	if src == nil {
 		return nil
 	}
 
-	dst := make([]*DaemonEntity, len(src))
+	dst = make([]*DaemonEntity, len(src))
 	copy(dst, src)
 	return dst
 }
 
-func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
+func (s *DaemonService) RegisterDaemon(daemon Daemon) (rtErr error) {
 	name, err := s.resolveDaemonName(daemon)
 	if err != nil {
 		return err
@@ -124,6 +128,7 @@ func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
 	s.orderMutex.Unlock()
 
 	entity.Order = order
+
 	// Daemon registered successfully, invalidate cache
 	s.invalidateDaemonCache()
 
@@ -139,7 +144,7 @@ func (s *DaemonService) RegisterDaemon(daemon Daemon) error {
 // This ensures dependencies are handled correctly: services that start first, stop last.
 //
 // Panics if the specified order is already used by another daemon.
-func (s *DaemonService) RegisterDaemonWithOrder(daemon Daemon, order int) error {
+func (s *DaemonService) RegisterDaemonWithOrder(daemon Daemon, order int) (rtErr error) {
 	name, err := s.resolveDaemonName(daemon)
 	if err != nil {
 		return err
@@ -170,7 +175,7 @@ func (s *DaemonService) RegisterDaemonWithOrder(daemon Daemon, order int) error 
 	return daemon.Registered()
 }
 
-func (s *DaemonService) GetDaemon(name string) *DaemonEntity {
+func (s *DaemonService) GetDaemon(name string) (entity *DaemonEntity) {
 	if v, f := s.DaemonMap.Load(name); f {
 		return v.(*DaemonEntity)
 	}
@@ -179,7 +184,7 @@ func (s *DaemonService) GetDaemon(name string) *DaemonEntity {
 }
 
 // getAllDaemonEntitySlice gets cached slice of all daemons (used by Start/Stop methods)
-func (s *DaemonService) getAllDaemonEntitySlice() []*DaemonEntity {
+func (s *DaemonService) getAllDaemonEntitySlice() (entities []*DaemonEntity) {
 	// First try to use cache
 	s.allDaemonCacheMutex.RLock()
 	if s.allDaemonCacheValid {
@@ -200,7 +205,7 @@ func (s *DaemonService) getAllDaemonEntitySlice() []*DaemonEntity {
 
 	// Rebuild cache
 	var el []*DaemonEntity
-	s.DaemonMap.Range(func(_, value interface{}) bool {
+	s.DaemonMap.Range(func(_, value interface{}) (next bool) {
 		el = append(el, value.(*DaemonEntity))
 		return true
 	})
@@ -213,7 +218,7 @@ func (s *DaemonService) getAllDaemonEntitySlice() []*DaemonEntity {
 	return s.cloneDaemonEntities(el)
 }
 
-func (s *DaemonService) UnregisterDaemon(name string) error {
+func (s *DaemonService) UnregisterDaemon(name string) (rtErr error) {
 	if v, f := s.DaemonMap.Load(name); f {
 		entity := v.(*DaemonEntity)
 		var c kkpanic.Caught
@@ -229,6 +234,7 @@ func (s *DaemonService) UnregisterDaemon(name string) error {
 		s.orderMutex.Unlock()
 
 		s.DaemonMap.Delete(name)
+
 		// Daemon unregistered successfully, invalidate cache
 		s.invalidateDaemonCache()
 		return c
@@ -250,7 +256,13 @@ func (s *DaemonService) entitySetNext(entity *DaemonEntity) {
 	}
 }
 
-func (s *DaemonService) getOrderedDaemonEntitySlice() []*DaemonEntity {
+func (s *DaemonService) entityNext(entity *DaemonEntity) (next time.Time) {
+	entity.nextMutex.RLock()
+	defer entity.nextMutex.RUnlock()
+	return entity.Next
+}
+
+func (s *DaemonService) getOrderedDaemonEntitySlice() (entities []*DaemonEntity) {
 	// First try to use cache
 	s.daemonCacheMutex.RLock()
 	if s.daemonCacheValid {
@@ -271,7 +283,7 @@ func (s *DaemonService) getOrderedDaemonEntitySlice() []*DaemonEntity {
 
 	// Rebuild cache
 	var el []*DaemonEntity
-	s.DaemonMap.Range(func(_, value interface{}) bool {
+	s.DaemonMap.Range(func(_, value interface{}) (next bool) {
 		switch value.(*DaemonEntity).Daemon.(type) {
 		case TimerDaemon, SchedulerDaemon:
 			el = append(el, value.(*DaemonEntity))
@@ -279,7 +291,7 @@ func (s *DaemonService) getOrderedDaemonEntitySlice() []*DaemonEntity {
 		return true
 	})
 
-	sort.Slice(el, func(i, j int) bool {
+	sort.Slice(el, func(i, j int) (less bool) {
 		el[i].nextMutex.RLock()
 		el[j].nextMutex.RLock()
 		result := el[i].Next.Before(el[j].Next)
@@ -296,55 +308,161 @@ func (s *DaemonService) getOrderedDaemonEntitySlice() []*DaemonEntity {
 	return s.cloneDaemonEntities(el)
 }
 
-func (s *DaemonService) Start() error {
+func (s *DaemonService) Start() (rtErr error) {
+	s.startAdmissionMutex.Lock()
 	if !atomic.CompareAndSwapInt32(&s.state, StateWait, StateStart) {
+		s.startAdmissionMutex.Unlock()
 		return kkpanic.Convert("DaemonService not in WAIT state")
 	}
+	s.startEpoch++
+	epoch := s.startEpoch
 
+	// Signal handling belongs to the admitted start epoch. Stop uses the same
+	// admission lock, so it cannot tear the epoch down before the handler exists.
 	s.startSignalHandling()
+	s.startAdmissionMutex.Unlock()
 
 	// Use cache to get all daemons
 	el := s.getAllDaemonEntitySlice()
 
-	sort.Slice(el, func(i, j int) bool {
+	sort.Slice(el, func(i, j int) (less bool) {
 		return el[i].Order < el[j].Order
 	})
 
 	for _, entity := range el {
-		if c := s.StartDaemon(entity); c != nil {
+		cycle, starter, err := s.admitStart(epoch, entity)
+		if err != nil {
+			return err
+		}
+
+		if c := s.runStartCycle(entity, cycle, starter); c != nil {
 			return c
 		}
 	}
 
-	s._LoopInvoker()
+	if !s.admitLoopInvoker(epoch) {
+		return kkpanic.Convert("DaemonService start interrupted by stop")
+	}
+
 	return nil
 }
 
-func (s *DaemonService) StartDaemon(entity *DaemonEntity) kkpanic.Caught {
-	if !atomic.CompareAndSwapInt32(entity.Daemon._State(), StateWait, StateStart) {
-		return kkpanic.Convert(fmt.Sprintf("%s not in WAIT state", entity.Daemon.Name()))
+// admitStart hands entity to this Start run, or refuses once Stop has taken over.
+// The epoch check and the cycle registration share startAdmissionMutex, which is
+// what guarantees that every admitted daemon is visible to Stop's shutdown scan
+// and that no daemon is launched after that scan.
+func (s *DaemonService) admitStart(epoch int64, entity *DaemonEntity) (cycle *daemonStartCycle, starter ContextStarter, rtErr error) {
+	s.startAdmissionMutex.Lock()
+	defer s.startAdmissionMutex.Unlock()
+
+	if s.startEpoch != epoch {
+		return nil, nil, kkpanic.Convert(fmt.Sprintf("%s start interrupted by stop", entity.Daemon.Name()))
 	}
 
-	var c kkpanic.Caught
+	cycle, starter, err := entity.beginStart()
+	if err != nil {
+		return nil, nil, kkpanic.Convert(err)
+	}
+
+	return cycle, starter, nil
+}
+
+// admitLoopInvoker starts the loop invoker only while this Start run still owns
+// the service, so a Stop that already finished never leaves a live invoker behind.
+func (s *DaemonService) admitLoopInvoker(epoch int64) (admitted bool) {
+	s.startAdmissionMutex.Lock()
+	defer s.startAdmissionMutex.Unlock()
+
+	if s.startEpoch != epoch {
+		return false
+	}
+
+	s._LoopInvoker()
+	return true
+}
+
+func (s *DaemonService) StartDaemon(entity *DaemonEntity) (rtCaught kkpanic.Caught) {
+	// Direct starts share the service admission barrier. They remain valid while
+	// the service is idle or running, but cannot slip behind an active Stop scan.
+	s.startAdmissionMutex.Lock()
+	if atomic.LoadInt32(&s.state) == StateStop {
+		s.startAdmissionMutex.Unlock()
+		return kkpanic.Convert(fmt.Sprintf("%s start interrupted by stop", entity.Daemon.Name()))
+	}
+	cycle, starter, err := entity.beginStart()
+	s.startAdmissionMutex.Unlock()
+	if err != nil {
+		return kkpanic.Convert(err)
+	}
+
+	return s.runStartCycle(entity, cycle, starter)
+}
+
+// runStartCycle runs the daemon start that cycle was opened for and settles it.
+// When Stop claimed the daemon mid-start, this path also owns the single late
+// Stop, so Stop is never called concurrently with a still-running Start.
+func (s *DaemonService) runStartCycle(entity *DaemonEntity, cycle *daemonStartCycle, starter ContextStarter) (rtCaught kkpanic.Caught) {
+	var startErr error
 	kkpanic.Try(func() {
-		atomic.StoreInt32(entity.Daemon._State(), StateRun)
-		entity.Daemon.Start()
-		s.entitySetNext(entity)
-		if s.invokeLoopDaemonTimer != nil {
-			s.loopInvokerReload <- 1
+		if starter != nil {
+			startErr = starter.StartContext(cycle.startCtx)
+			if startErr != nil {
+				return
+			}
+		} else {
+			entity.Daemon.Start()
 		}
 
-		// Mark daemon as successfully started
-		atomic.StoreInt32(&entity.started, 1)
-		kklogger.InfoJ("DaemonService.StartDaemon", fmt.Sprintf("entity %s started", entity.Name))
+		// Scheduling setup is part of startup and stays inside the same panic
+		// boundary. A panic here must settle the cycle as a failed start.
+		s.entitySetNext(entity)
 	}).CatchAll(func(caught kkpanic.Caught) {
-		c = caught
-		kklogger.ErrorJ("DaemonService.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
-	}).Finally(func() {
-		atomic.StoreInt32(entity.Daemon._State(), StateStart)
+		rtCaught = caught
 	})
 
-	return c
+	succeeded := rtCaught == nil && startErr == nil
+	outcome, sig := entity.finishStart(cycle, succeeded)
+	switch outcome {
+	case daemonStartOutcomeStarted:
+		s.reloadLoopInvoker()
+		kklogger.InfoJ("DaemonService.StartDaemon", fmt.Sprintf("entity %s started", entity.Name))
+		return nil
+	case daemonStartOutcomeLateStop:
+		s.invokeStop(entity, cycle, sig)
+		return kkpanic.Convert(fmt.Sprintf("%s start interrupted by stop", entity.Daemon.Name()))
+	}
+
+	if rtCaught != nil {
+		kklogger.ErrorJ("DaemonService.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, rtCaught.String()))
+		return rtCaught
+	}
+
+	if startErr != nil {
+		kklogger.ErrorJ("DaemonService.Start", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, startErr.Error()))
+		return kkpanic.Convert(startErr)
+	}
+
+	return nil
+}
+
+// reloadLoopInvoker wakes a running loop invoker so a daemon started while the
+// service is already up joins the next scheduling round.
+func (s *DaemonService) reloadLoopInvoker() {
+	s.timerMutex.Lock()
+	running := s.invokeLoopDaemonTimer != nil
+	stopFuture := s.stopFuture
+	s.timerMutex.Unlock()
+
+	if !running {
+		return
+	}
+
+	// Stop may end the invoker after the timer check. Waiting on the same stop
+	// future prevents a reload send from blocking after the receiver has exited.
+	select {
+	case s.loopInvokerReload <- 1:
+	case <-stopFuture.Done():
+	}
 }
 
 func (s *DaemonService) _LoopInvoker() {
@@ -366,17 +484,16 @@ func (s *DaemonService) _LoopInvoker() {
 			}
 
 			for _, entity := range s.getOrderedDaemonEntitySlice() {
-				isDue := !entity.Next.After(now)
+				entityNext := s.entityNext(entity)
+				isDue := !entityNext.After(now)
 				if isDue {
-					if atomic.CompareAndSwapInt32(entity.Daemon._State(), StateStart, StateRun) {
+					if cycle, admitted := entity.beginLoop(); admitted {
 						// Set next execution time immediately before starting goroutine
 						s.entitySetNext(entity)
 						needsCacheInvalidation = true
 
-						go func(entity *DaemonEntity) {
-							defer func() {
-								atomic.StoreInt32(entity.Daemon._State(), StateStart)
-							}()
+						go func(entity *DaemonEntity, cycle *daemonStartCycle) {
+							defer entity.finishLoop(cycle)
 
 							if looper, ok := entity.Daemon.(Looper); ok {
 								kkpanic.Catch(func() {
@@ -390,11 +507,11 @@ func (s *DaemonService) _LoopInvoker() {
 									kklogger.ErrorJ("panic.Log", r)
 								})
 							}
-						}(entity)
+						}(entity, cycle)
 					}
 				}
 
-				updateNext(entity.Next)
+				updateNext(s.entityNext(entity))
 				if !isDue {
 					break
 				}
@@ -442,10 +559,17 @@ func (s *DaemonService) _LoopInvoker() {
 	}()
 }
 
-func (s *DaemonService) Stop(sig os.Signal) error {
+func (s *DaemonService) Stop(sig os.Signal) (rtErr error) {
+	// Changing the service state and invalidating the epoch under one admission
+	// lock is the shutdown linearization point. Every earlier admission is visible
+	// to the shutdown scan, and no later daemon or signal handler can be admitted.
+	s.startAdmissionMutex.Lock()
 	if !atomic.CompareAndSwapInt32(&s.state, StateStart, StateStop) {
+		s.startAdmissionMutex.Unlock()
 		return kkpanic.Convert("DaemonService not in START state")
 	}
+	s.startEpoch++
+	s.startAdmissionMutex.Unlock()
 
 	s.stopSignalHandling()
 
@@ -463,7 +587,7 @@ func (s *DaemonService) Stop(sig os.Signal) error {
 	// Use cache to get all daemons
 	el := s.getAllDaemonEntitySlice()
 
-	sort.Slice(el, func(i, j int) bool {
+	sort.Slice(el, func(i, j int) (less bool) {
 		return el[i].Order > el[j].Order
 	})
 
@@ -475,41 +599,66 @@ func (s *DaemonService) Stop(sig os.Signal) error {
 	s.timerMutex.Unlock()
 
 	for _, entity := range el {
-		// Only stop daemons that were successfully started
-		if atomic.LoadInt32(&entity.started) == 1 {
-			if c := s.StopDaemon(entity, sig); c != nil {
-				kklogger.ErrorJ("DaemonService.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, c.String()))
-			}
-		}
+		s.shutdownEntity(entity, sig)
 	}
 
 	return nil
 }
 
-func (s *DaemonService) StopDaemon(entity *DaemonEntity, sig os.Signal) kkpanic.Caught {
-	defer func() {
-		atomic.StoreInt32(entity.Daemon._State(), StateWait)
-		// Reset started flag after stopping
-		atomic.StoreInt32(&entity.started, 0)
-	}()
-	if !atomic.CompareAndSwapInt32(entity.Daemon._State(), StateStart, StateStop) &&
-		!atomic.CompareAndSwapInt32(entity.Daemon._State(), StateRun, StateStop) {
-		return kkpanic.Convert(fmt.Sprintf("%s not in START/RUN state", entity.Daemon.Name()))
+// shutdownEntity stops one daemon on behalf of Stop. Daemons that never started
+// successfully are skipped, a cancellable startup is cancelled and awaited, and a
+// legacy blocking Start is only marked so Stop never waits for it.
+func (s *DaemonService) shutdownEntity(entity *DaemonEntity, sig os.Signal) {
+	claim, err := entity.claimStop(sig, false)
+	if err != nil {
+		kklogger.ErrorJ("DaemonService.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, err.Error()))
+		return
 	}
 
-	var c kkpanic.Caught
+	switch claim.action {
+	case daemonStopInvoke:
+		s.invokeStop(entity, claim.cycle, sig)
+	case daemonStopWait:
+		<-claim.cycle.done
+	case daemonStopDeferred:
+		kklogger.InfoJ("DaemonService.Stop", fmt.Sprintf("entity %s stop deferred until its blocking start returns", entity.Name))
+	}
+}
+
+func (s *DaemonService) StopDaemon(entity *DaemonEntity, sig os.Signal) (rtCaught kkpanic.Caught) {
+	claim, err := entity.claimStop(sig, true)
+	if err != nil {
+		return kkpanic.Convert(err)
+	}
+
+	switch claim.action {
+	case daemonStopInvoke:
+		return s.invokeStop(entity, claim.cycle, sig)
+	case daemonStopWait, daemonStopDeferred:
+		// Direct callers own completion semantics. Unlike service-wide shutdown,
+		// they wait so a successful return means the daemon is actually stopped.
+		<-claim.cycle.done
+		return claim.cycle.stopCaught
+	}
+
+	return nil
+}
+
+// invokeStop runs the daemon Stop the caller claimed and releases the daemon.
+func (s *DaemonService) invokeStop(entity *DaemonEntity, cycle *daemonStartCycle, sig os.Signal) (rtCaught kkpanic.Caught) {
 	kkpanic.Try(func() {
 		entity.Daemon.Stop(sig)
 		kklogger.InfoJ("DaemonService.StopDaemon", fmt.Sprintf("entity %s stopped", entity.Name))
 	}).CatchAll(func(caught kkpanic.Caught) {
-		c = caught
+		rtCaught = caught
 		kklogger.ErrorJ("DaemonService.Stop", fmt.Sprintf("Daemon %s fail, message: %s", entity.Name, caught.String()))
 	})
 
-	return c
+	entity.completeStop(cycle, rtCaught)
+	return rtCaught
 }
 
-func (s *DaemonService) IsShutdown() bool {
+func (s *DaemonService) IsShutdown() (shutdown bool) {
 	return atomic.LoadInt32(&s.shutdownState) == 1
 }
 
@@ -529,10 +678,9 @@ func (s *DaemonService) ShutdownGracefully() {
 	}
 }
 
-func (s *DaemonService) ShutdownFuture() concurrent.Future {
+func (s *DaemonService) ShutdownFuture() (future concurrent.Future) {
 	return s.shutdownFuture
 }
-
 
 func (s *DaemonService) startSignalHandling() {
 	s.signalMutex.Lock()
@@ -542,7 +690,7 @@ func (s *DaemonService) startSignalHandling() {
 		return
 	}
 
-	drainStart:
+drainStart:
 	for {
 		select {
 		case <-s.sig:
@@ -568,7 +716,7 @@ func (s *DaemonService) stopSignalHandling() {
 	signal.Stop(s.sig)
 	close(stopCh)
 
-	drainStop:
+drainStop:
 	for {
 		select {
 		case <-s.sig:
@@ -577,7 +725,7 @@ func (s *DaemonService) stopSignalHandling() {
 			break drainStop
 		}
 	}
-	
+
 	s.signalMutex.Unlock()
 }
 
